@@ -1,0 +1,22 @@
+{
+  "author": "Dan Tillberg <dan@tillberg.us> (http://tillberg.us/)",
+  "name": "guts",
+  "description": "Guts",
+  "version": "0.0.0",
+  "homepage": "https://github.com/tillberg/guts",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/tillberg/guts.git"
+  },
+  "main": "lib/guts.js",
+  "dependencies": {
+    "watch": "0.5.1",
+    "underscore": "1.2.1",
+    "underscore.string": "2.0.0"
+  },
+  "devDependencies": {},
+  "optionalDependencies": {},
+  "engines": {
+    "node": "*"
+  }
+}
