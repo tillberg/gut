@@ -16,7 +16,7 @@ class FSEventHandler(FileSystemEventHandler):
         :type event:
             :class:`FileSystemEvent`
         """
-        if not '/.gut/' in event.src_path:
+        if not '.gut' in event.src_path:
             if event.is_directory:
                 print '%s %s' % (EVENT_TYPE_CREATED, event.src_path)
             else:
