@@ -16,12 +16,15 @@ class FSEventHandler(FileSystemEventHandler):
         :type event:
             :class:`FileSystemEvent`
         """
-        if not event.is_directory and not '/.gut/' in event.src_path:
-            if event.event_type == EVENT_TYPE_MOVED:
-                print '%s %s' % (EVENT_TYPE_DELETED, event.src_path)
-                print '%s %s' % (EVENT_TYPE_CREATED, event.dest_path)
+        if not '/.gut/' in event.src_path:
+            if event.is_directory:
+                print '%s %s' % (EVENT_TYPE_CREATED, event.src_path)
             else:
-                print '%s %s' % (event.event_type, event.src_path)
+                if event.event_type == EVENT_TYPE_MOVED:
+                    print '%s %s' % (EVENT_TYPE_DELETED, event.src_path)
+                    print '%s %s' % (EVENT_TYPE_CREATED, event.dest_path)
+                else:
+                    print '%s %s' % (event.event_type, event.src_path)
             sys.stdout.flush()
 
 if __name__ == "__main__":
