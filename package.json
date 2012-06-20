@@ -12,7 +12,8 @@
   "dependencies": {
     "watch": "0.5.1",
     "underscore": "1.2.1",
-    "underscore.string": "2.0.0"
+    "underscore.string": "2.0.0",
+    "async": "0.1.22"
   },
   "devDependencies": {},
   "optionalDependencies": {},
