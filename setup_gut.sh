@@ -1,4 +1,5 @@
 npm install
+sudo apt-get install gettext
 sudo pip install -r requirements.txt
 sudo sysctl fs.inotify.max_user_watches=1048576
 git clone git://github.com/tillberg/git.git
