@@ -9,3 +9,8 @@ make configure
 ./configure --prefix=/usr
 make
 sudo make install
+cd ..
+git clone git://github.com/tillberg/watchdog.git
+sudo aptitude install libyaml-dev
+cd watchdog
+sudo python setup.py install

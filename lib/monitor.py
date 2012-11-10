@@ -28,12 +28,13 @@ class FSEventHandler(FileSystemEventHandler):
             sys.stdout.flush()
 
 if __name__ == "__main__":
+    time.sleep(0.1)
     observer = Observer()
     observer.schedule(FSEventHandler(), path=sys.argv[1], recursive=True)
     observer.start()
     try:
         while True:
-            time.sleep(0.1)
+            time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
