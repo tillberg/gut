@@ -10,7 +10,6 @@
   },
   "main": "lib/guts.js",
   "dependencies": {
-    "watch": "0.5.1",
     "underscore": "1.2.1",
     "underscore.string": "2.0.0",
     "async": "0.1.22"
