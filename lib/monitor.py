@@ -28,6 +28,8 @@ class FSEventHandler(FileSystemEventHandler):
             sys.stdout.flush()
 
 if __name__ == "__main__":
+    from setproctitle import setproctitle
+    setproctitle('gutsmon')
     time.sleep(0.1)
     observer = Observer()
     observer.schedule(FSEventHandler(), path=sys.argv[1], recursive=True)
