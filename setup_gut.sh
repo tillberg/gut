@@ -1,7 +1,10 @@
 npm install
 
+# This fails on ubuntu, but whatever...
+brew install libyaml
+
 # These next two commands fail on OSX, but that's okay:
-sudo apt-get install gettext libyaml-dev curl libcurl4-openssl-dev libexpat1-dev gettext autoconf
+sudo apt-get install gettext libyaml-dev curl libcurl4-openssl-dev libexpat1-dev autoconf
 sudo sysctl fs.inotify.max_user_watches=1048576
 
 pip install -r requirements.txt
