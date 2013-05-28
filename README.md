@@ -7,7 +7,7 @@ Synchronize a folder hierarchy with a clone of git where everything
 Install
 =======
 
-- Clone this and then run `git submodule init --update`
+- Clone this and then run `git submodule update --init`
 - For Ubuntu, `sudo apt-get npm` to install nodejs and npm
 - For OSX, install homebrew and the XCode command line tools, then
   `brew install nodejs` followed by `curl https://npmjs.org/install.sh | sudo sh`
