@@ -31,8 +31,10 @@ if __name__ == "__main__":
     from setproctitle import setproctitle
     setproctitle('gutsmon')
     time.sleep(0.1)
+    path = sys.argv[1]
+    print >> sys.stderr, "watchdog monitoring %s" % (path,)
     observer = Observer()
-    observer.schedule(FSEventHandler(), path=sys.argv[1], recursive=True)
+    observer.schedule(FSEventHandler(), path=path, recursive=True)
     observer.start()
     try:
         while True:
