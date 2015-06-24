@@ -10,9 +10,10 @@
   },
   "main": "lib/guts.js",
   "dependencies": {
+    "async": "0.1.22",
+    "tillberg_common": "git+ssh://git@github.com/tillberg/tillberg_common.git",
     "underscore": "1.2.1",
-    "underscore.string": "2.0.0",
-    "async": "0.1.22"
+    "underscore.string": "2.0.0"
   },
   "devDependencies": {},
   "optionalDependencies": {},
