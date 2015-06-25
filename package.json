@@ -19,5 +19,8 @@
   "optionalDependencies": {},
   "engines": {
     "node": "*"
+  },
+  "bin": {
+    "guts": "guts.py"
   }
 }
