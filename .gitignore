@@ -13,6 +13,7 @@ results
 
 node_modules
 npm-debug.log.gut/
-/git
+/gut
+/gut-dist
 .gut/
 *~
