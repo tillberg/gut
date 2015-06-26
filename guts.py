@@ -1,43 +1,48 @@
 #!/usr/bin/env python
 
 import argparse
-import os
-import subprocess
-
-import lib.build_gut
-
-verbose = None
-guts_path = os.path.dirname(os.path.realpath(__file__))
-gut_src_path = os.path.join(guts_path, 'gut')
-gut_dist_path = os.path.join(guts_path, 'gut-dist')
-
-def ensure_build():
-    if not os.path.exists(gut_dist_path):
-        build()
-
 import codecs
 import multiprocessing
 import os
 import shutil
 import stat
 import subprocess
-from sys import platform as _platform
-is_osx = _platform == 'darwin'
+import sys
 
 GIT_VERSION = 'v2.4.4'
 
-def system(_args, cwd=None):
+guts_path = os.path.dirname(os.path.realpath(__file__))
+gut_src_path = os.path.join(guts_path, 'gut')
+gut_dist_path = os.path.join(guts_path, 'gut-dist')
+gut_exe_path = os.path.join(gut_dist_path, 'bin/gut')
+
+def ensure_build():
+    if not os.path.exists(gut_dist_path):
+        build()
+
+def system(_args, cwd=None, pipe_stdout=True, pipe_stderr=True):
+    if not cwd:
+        raise Exception('You must always pass cwd to `system`')
     args = [str(arg) for arg in _args]
+    def cmd_repr(_cmd):
+        return os.path.basename(_cmd)
     def arg_repr(_arg):
         # this is not perfect, but it's good enough for logging purposes:
         return '"%s"' % (arg,) if ' ' in arg else arg
-    line = ' '.join([arg_repr(arg) for arg in args])
+    line = '%s %s' % (cmd_repr(args[0]), ' '.join([arg_repr(arg) for arg in args[1:]]))
     print('> %s' % (line,))
-    subprocess.call(args, cwd=cwd)
+    proc = subprocess.Popen(args, cwd=cwd, stdout=(None if pipe_stdout else subprocess.PIPE), stderr=(None if pipe_stderr else subprocess.PIPE))
+    out, _ = proc.communicate()
+    return (out.strip(), proc.returncode)
+
+def gut_exec(cmd, args=[], cwd=None, quiet=False):
+    if not isinstance(cmd, str):
+        raise Exception('gut_exec requires string for first argument')
+    return system([gut_exe_path] + [cmd] + args, cwd=cwd, pipe_stdout=False, pipe_stderr=(not quiet))
 
 def build():
     install_prefix = 'prefix=%s' % (gut_dist_path,)
-    if is_osx:
+    if sys.platform == 'darwin':
         system(['brew', 'install', 'libyaml'])
     else:
         system(['sudo', 'apt-get', 'install', 'gettext', 'libyaml-dev', 'curl', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf']) #python-pip python-dev
@@ -94,31 +99,39 @@ def build():
 
 def init(local):
     ensure_build()
+    did_anything = False
     if not os.path.exists(os.path.join(local, '.gut')):
-        system(['gut', 'init'], cwd=local)
+        gut_exec('init', cwd=local)
+        did_anything = True
+    head, code = gut_exec('rev-parse', ['HEAD'], cwd=local, quiet=True)
+    if code:
+        print('HEAD: %s (%s)' % (head, code))
+        gut_exec('commit', ['--allow-empty', '--message', 'Initial commit'], cwd=local)
+    # if not os.path.exists():
+    #     pass
+    if not did_anything:
+        print('Already initialized gut in %s' % (local,))
 
 def sync(local, remote):
     init(local)
     # sync(...)
 
 def main():
-    global verbose
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['init', 'build', 'sync'])
-    args = parser.parse_args()
-    parser.add_argument('--verbose', '-v', action='count')
-    if args.action == 'init' or args.action == 'sync':
+    # parser.add_argument('--verbose', '-v', action='count')
+    peek_action = sys.argv[1] if len(sys.argv) > 1 else None
+    if peek_action == 'init' or peek_action == 'sync':
         parser.add_argument('local')
-    if args.action == 'sync':
+    if peek_action == 'sync':
         parser.add_argument('remote')
     args = parser.parse_args()
-    verbose = args.verbose != None
     if args.action == 'init':
-        init(args.local)
+        init(os.path.abspath(args.local))
     elif args.action == 'build':
         build()
     else:
-        sync(args.local, args.remote)
+        sync(os.path.abspath(args.local), os.path.abspath(args.remote))
 
 if __name__ == '__main__':
     main()
