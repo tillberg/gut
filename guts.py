@@ -3,14 +3,18 @@
 import argparse
 import codecs
 import paramiko
-from plumbum import local, SshMachine
+from plumbum import local, SshMachine, FG
 from plumbum.cmd import sudo, git, make
 from plumbum.machines.paramiko_machine import ParamikoMachine
 import multiprocessing
 import os
+import Queue
+import re
 import shutil
+import socket
 import stat
 import sys
+from threading import Thread
 
 GIT_VERSION = 'v2.4.4'
 
@@ -18,6 +22,9 @@ guts_path = os.path.dirname(os.path.realpath(__file__))
 gut_src_path = os.path.join(guts_path, 'gut')
 gut_dist_path = os.path.join(guts_path, 'gut-dist')
 gut_exe_path = os.path.join(gut_dist_path, 'bin/gut')
+
+threads = []
+shutting_down = False
 
 def ensure_build():
     if not os.path.exists(gut_dist_path):
@@ -112,8 +119,61 @@ def init(local_path):
     if not did_anything:
         print('Already initialized gut in %s' % (local_path,))
 
-def watch(local_path):
-    pass
+def watch_for_changes(context, path, event_prefix, event_queue):
+    def run():
+        try:
+            with context.cwd(path):
+                watched_root = context['pwd']().strip()
+                # try inotifywait first:
+                if context['which']['inotifywait'](retcode=None):
+                    # for OSX: context['fswatch']['./']
+                    inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
+                    watcher = context['inotifywait']['--monitor', '--recursive', '--format', '%w%f']
+                    for event in inotify_events:
+                        watcher = watcher['--event', event]
+                    watcher = watcher['./']
+                    watch_type = 'inotifywait'
+                elif context['which']['fswatch'](retcode=None):
+                    watcher = context['fswatch']['./']
+                    watch_type = 'fswatch'
+                else:
+                    out('guts requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
+                    sys.exit(1)
+                wd_prefix = ('%s:' % (context.host,)) if event_prefix == 'remote' else ''
+                out('Using %s to listen for changes in %s%s\n' % (watch_type, wd_prefix, watched_root,))
+                proc = watcher.popen()
+                while not shutting_down:
+                    line = proc.stdout.readline()
+                    if line != '':
+                        changed_path = line.rstrip()
+                        changed_path = os.path.abspath(os.path.join(watched_root, changed_path))
+                        rel_path = os.path.relpath(changed_path, watched_root)
+                        # out('changed_path: ' + changed_path + '\n')
+                        # out('watched_root: ' + watched_root + '\n')
+                        # out('changed ' + changed_path + ' -> ' + rel_path + '\n')
+                        event_queue.put((event_prefix, rel_path))
+                    else:
+                        break
+        except socket.error:
+            if not shutting_down:
+                raise
+        # print >> sys.stderr, 'watch_for_changes exiting'
+    thread = Thread(target=run)
+    thread.daemon = True
+    thread.start()
+    return thread
+
+def shutdown():
+    # out('SHUTTING DOWN\n')
+    global shutting_down
+    shutting_down = True
+    joinable_threads = [t for t in threads if not t.isDaemon()]
+    for thread in joinable_threads:
+        thread.stop()
+    for thread in joinable_threads:
+        thread.join()
+    # out('SHUTDOWN\n')
+    sys.exit(0)
 
 def sync(local_path, remote_host, remote_path, use_openssl=False):
     init(local_path)
@@ -123,21 +183,43 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
     else:
         # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
         remote = ParamikoMachine(remote_host, missing_host_policy=paramiko.AutoAddPolicy())
-    out(remote['ls']())
-    out(remote['ls']())
-    out(remote['ls']())
-    out(remote['ls']())
-    out(remote['ls']())
+
+    event_queue = Queue.Queue()
+    threads.append(watch_for_changes(local, local_path, 'local', event_queue))
+    threads.append(watch_for_changes(remote, remote_path, 'remote', event_queue))
+    while True:
+        recent_changes = False
+        try:
+            event = event_queue.get(True, 0.1 if recent_changes else 10000)
+        except Queue.Empty:
+            if recent_changes:
+                out('Commit changes.\n')
+                recent_changes = False
+        except KeyboardInterrupt:
+            shutdown()
+            raise
+        else:
+            recent_changes = False
+            system, path = event
+            out('changed %s %s\n' % (system, path))
+
+    rguts_path = remote.path(remote_path)
+    # if not rguts_path.exist():
+
+    # remote['stat']['.guts'] & FG
+    # run(remote['which']['git'])
+    # run(remote['which']['gut'])
     with local.cwd(local_path):
         gut = local[gut_exe_path]
 
     # sync(...)
+    out('Sync exiting.\n')
 
 def main():
     peek_action = sys.argv[1] if len(sys.argv) > 1 else None
     # parser.add_argument('--verbose', '-v', action='count')
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['init', 'build', 'sync'])
+    parser.add_argument('action', choices=['init', 'build', 'sync', 'watch'])
     if peek_action == 'init' or peek_action == 'sync' or peek_action == 'watch':
         parser.add_argument('local')
     if peek_action == 'sync':
@@ -147,16 +229,19 @@ def main():
     if args.action == 'build':
         build()
     else:
-        local_path = os.path.abspath(args.local)
+        local_path = args.local
         if args.action == 'init':
             init(local_path)
         elif args.action == 'watch':
-            watch(local_path)
+            for line in iter_fs_watch(local, local_path):
+                out(line + '\n')
         else:
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
             remote_host, remote_path = args.remote.split(':', 1)
-            sync(local_path, remote_host, os.path.abspath(remote_path), use_openssl=args.openssl)
+            # Since we start at the remote home directory by default, we can replace ~/ with ./
+            remote_path = re.sub(r'^~/', './', remote_path)
+            sync(local_path, remote_host, remote_path, use_openssl=args.openssl)
 
 if __name__ == '__main__':
     main()
