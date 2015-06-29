@@ -16,12 +16,11 @@ import stat
 import sys
 from threading import Thread
 
-GIT_VERSION = 'v2.4.4'
-
-guts_path = os.path.dirname(os.path.realpath(__file__))
-gut_src_path = os.path.join(guts_path, 'gut')
-gut_dist_path = os.path.join(guts_path, 'gut-dist')
-gut_exe_path = os.path.join(gut_dist_path, 'bin/gut')
+GIT_REPO_URL = 'https://github.com/git/git.git'
+GIT_VERSION = 'v2.4.5'
+GUTS_PATH = '~/.guts'
+GUT_SRC_PATH = os.path.join(GUTS_PATH, 'gut-src')
+GUT_DIST_PATH = os.path.join(GUTS_PATH, 'gut-dist')
 
 threads = []
 shutting_down = False
@@ -75,31 +74,44 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             dirs.append(folder)
 
-def build():
+# def install_build_deps():
+#     if sys.platform == 'darwin':
+#         local['brew']['install', 'libyaml']()
+#     else:
+#         sudo[local['apt-get']['install', 'gettext', 'libyaml-dev', 'curl', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf']]() #python-pip python-dev
+#         sudo[local['sysctl']['fs.inotify.max_user_watches=1048576']]()
+
+def gut_prepare(context):
+    guts_path = context.path(GUTS_PATH)
+    gut_src_path = context.path(GUT_SRC_PATH)
+    context['mkdir']['-p', guts_path]
+    if not gut_src_path.exists():
+        out('Cloning %s into %s...' % (GIT_REPO_URL, gut_src_path,))
+        context['git']['clone', GIT_REPO_URL, gut_src_path]()
+        out(' done.\n')
+    with context.cwd(gut_src_path):
+        if not context['git']['rev-parse', GIT_VERSION](retcode=None).strip():
+            out('Updating git in order to upgrade to %s...' % (GIT_VERSION,))
+            context['git']['fetch']()
+            out(' done.\n')
+        out('Checking out fresh copy of git %s...' % (GIT_VERSION,))
+        context['git']['reset', '--hard', GIT_VERSION]()
+        context['git']['clean', '-fd']()
+        context['make']['clean']()
+        out(' done.\nRewriting git to gut...')
+        rename_git_to_gut_recursive('%s' % (gut_src_path,))
+        out(' done.\n')
+
+def gut_build(context):
+    gut_src_path = context.path(GUT_SRC_PATH)
+    gut_dist_path = context.path(GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (gut_dist_path,)
-    if sys.platform == 'darwin':
-        local['brew']['install', 'libyaml']()
-    else:
-        sudo[local['apt-get']['install', 'gettext', 'libyaml-dev', 'curl', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf']]() #python-pip python-dev
-        sudo[local['sysctl']['fs.inotify.max_user_watches=1048576']]()
-    if not os.path.exists(gut_src_path):
-        out('Cloning git... ')
-        git['clone', 'https://github.com/git/git.git', gut_src_path]()
-        out('done.\n')
-    with local.cwd(gut_src_path):
-        out('Updating git... ')
-        git['fetch']()
-        out('done.\nRewriting git to gut... ')
-        sys.stdout.flush()
-        git['reset', '--hard', GIT_VERSION]()
-        git['clean', '-fd']()
-        make[install_prefix, 'clean']()
-        rename_git_to_gut_recursive(gut_src_path)
-        out('done.\nBuilding gut... ')
-        sys.stdout.flush()
-        make[install_prefix, '-j', multiprocessing.cpu_count()]()
-        make[install_prefix, 'install']()
-        out('done.\nInstalled gut into %s.\n' % (gut_dist_path,))
+    with context.cwd(gut_src_path):
+        parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
+        out('Building gut using up to %s processes...' % (parallelism,))
+        context['make'][install_prefix, '-j', parallelism]()
+        context['make'][install_prefix, 'install']()
+        out(' done.\nInstalled gut into %s\n' % (gut_dist_path,))
 
 def gut_rev_parse(commitish):
     return local[gut_exe_path]['rev-parse', commitish](retcode=None).strip()
@@ -227,7 +239,9 @@ def main():
     parser.add_argument('--openssl', action='store_true')
     args = parser.parse_args()
     if args.action == 'build':
-        build()
+        # gut_exe_path = os.path.join(gut_dist_path, 'bin/gut')
+        gut_prepare(local)
+        gut_build(local)
     else:
         local_path = args.local
         if args.action == 'init':
