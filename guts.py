@@ -2,13 +2,14 @@
 
 import argparse
 import codecs
-from plumbum import local
+import paramiko
+from plumbum import local, SshMachine
 from plumbum.cmd import sudo, git, make
+from plumbum.machines.paramiko_machine import ParamikoMachine
 import multiprocessing
 import os
 import shutil
 import stat
-import subprocess
 import sys
 
 GIT_VERSION = 'v2.4.4'
@@ -111,28 +112,51 @@ def init(local_path):
     if not did_anything:
         print('Already initialized gut in %s' % (local_path,))
 
-def sync(local_path, remote):
+def watch(local_path):
+    pass
+
+def sync(local_path, remote_host, remote_path, use_openssl=False):
     init(local_path)
+    out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
+    if use_openssl:
+        remote = SshMachine(remote_host)
+    else:
+        # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
+        remote = ParamikoMachine(remote_host, missing_host_policy=paramiko.AutoAddPolicy())
+    out(remote['ls']())
+    out(remote['ls']())
+    out(remote['ls']())
+    out(remote['ls']())
+    out(remote['ls']())
     with local.cwd(local_path):
         gut = local[gut_exe_path]
+
     # sync(...)
 
 def main():
+    peek_action = sys.argv[1] if len(sys.argv) > 1 else None
+    # parser.add_argument('--verbose', '-v', action='count')
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['init', 'build', 'sync'])
-    # parser.add_argument('--verbose', '-v', action='count')
-    peek_action = sys.argv[1] if len(sys.argv) > 1 else None
-    if peek_action == 'init' or peek_action == 'sync':
+    if peek_action == 'init' or peek_action == 'sync' or peek_action == 'watch':
         parser.add_argument('local')
     if peek_action == 'sync':
         parser.add_argument('remote')
+    parser.add_argument('--openssl', action='store_true')
     args = parser.parse_args()
-    if args.action == 'init':
-        init(os.path.abspath(args.local))
-    elif args.action == 'build':
+    if args.action == 'build':
         build()
     else:
-        sync(os.path.abspath(args.local), os.path.abspath(args.remote))
+        local_path = os.path.abspath(args.local)
+        if args.action == 'init':
+            init(local_path)
+        elif args.action == 'watch':
+            watch(local_path)
+        else:
+            if ':' not in args.remote:
+                parser.error('remote must include both the hostname and path, separated by a colon')
+            remote_host, remote_path = args.remote.split(':', 1)
+            sync(local_path, remote_host, os.path.abspath(remote_path), use_openssl=args.openssl)
 
 if __name__ == '__main__':
     main()
