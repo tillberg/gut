@@ -85,8 +85,14 @@ def out_dim(text):
     out(dim(text))
 
 ANSI_COLORS = {'grey': 30, 'red': 31, 'green': 32, 'yellow': 33, 'blue': 34, 'magenta': 35, 'cyan': 36, 'white': 37}
-def colored(text, color):
-    return ansi(ANSI_COLORS[color]) + unicode(text) + ANSI_RESET_COLOR
+def colored(color):
+    def _colored(text):
+        return ansi(ANSI_COLORS[color]) + unicode(text) + ANSI_RESET_COLOR
+    return _colored
+color_path = colored('blue')
+color_host = colored('yellow')
+color_commit = colored('green')
+color_error = colored('red')
 
 def dim(text):
     return ANSI_DIM + unicode(text) + ANSI_RESET_ALL
@@ -94,32 +100,11 @@ def dim(text):
 def bright(text):
     return ANSI_BRIGHT + unicode(text) + ANSI_RESET_ALL
 
-def filter_dim(text):
-    text = text.replace(ANSI_RESET_ALL, ANSI_RESET_ALL + ANSI_DIM)
-    text = text.replace(ANSI_RESET_COLOR, ANSI_RESET_COLOR + ANSI_DIM)
-    text = text.replace(ANSI_BRIGHT, '')
-    return ANSI_DIM + text + ANSI_RESET_ALL
-
-def quote(context, text, dim_lines=False):
+def quote(context, text):
     for line in text.strip().split('\n'):
         # Avoid outputting lines that only contain control characters and whitespace
         if RE_ANSI.sub('', line).strip():
-            out(dim('[') + context._name + dim('] ') + (dim(line) if dim_lines else line) + '\n')
-
-def quote_dim(context, text):
-    quote(context, filter_dim(text), dim_lines=True)
-
-def color_path(text):
-    return colored(text, 'blue')
-
-def color_host(text):
-    return colored(text, 'yellow')
-
-def color_commit(text):
-    return colored(text, 'green')
-
-def color_error(text):
-    return colored(text, 'red')
+            out(dim('[') + context._name + dim('] ') + line + '\n')
 
 def rename_git_to_gut_recursive(root_path):
     def rename_git_to_gut(s):
@@ -166,10 +151,10 @@ def install_build_deps(context):
     # XXX This ought to either be moved to a README or be made properly interactive.
     out_dim('Installing build dependencies...\n')
     if context['which']['apt-get'](retcode=None):
-        quote_dim(context, context['sudo'][context['apt-get']['install', '-y', 'gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']]())
+        quote(context, context['sudo'][context['apt-get']['install', '-y', 'gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']]())
         # sudo[context['sysctl']['fs.inotify.max_user_watches=1048576']]()
     else:
-        quote_dim(context, context['brew']['install', 'libyaml', 'fswatch', 'autossh']())
+        quote(context, context['brew']['install', 'libyaml', 'fswatch', 'autossh']())
     out_dim('Done.\n')
 
 def ensure_guts_folders(context):
@@ -382,7 +367,7 @@ def gut_commit(context, path):
         head_after = gut_rev_parse_head(context)
         made_a_commit = head_before != head_after
         out(' ' + (('committed ' + color_commit(head_after[:GUT_HASH_DISPLAY_CHARS])) if made_a_commit else 'none') + dim('.\n'))
-        # quote_dim(context, commit_out)
+        # quote(context, commit_out)
         return made_a_commit
 
 def gut_pull(context, path):
