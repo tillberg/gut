@@ -322,6 +322,7 @@ def run_gut_daemon(context, path):
     kill_via_pidfile(context, 'gut-daemon')
     pidfile_opt = '--pid-file=%s' % (pidfile_path(context, 'gut-daemon'),)
     proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (GUTD_BIND_PORT,), repo_path].popen()
+    active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
     pipe_to_stderr(proc.stdout, '%s_daemon_out' % (context._name,))
     pipe_to_stderr(proc.stderr, '%s_daemon_err' % (context._name,))
 
@@ -350,6 +351,7 @@ def run_gut_daemons(local, local_path, remote, remote_path):
     kill_via_pidfile(local, 'autossh')
     local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
     proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address].popen()
+    active_pidfiles.append((local, 'autossh')) # autossh writes its own pidfile
     pipe_to_stderr(proc.stdout, 'autossh_out')
     pipe_to_stderr(proc.stderr, 'autossh_err')
 
