@@ -2,10 +2,6 @@
 
 import argparse
 import codecs
-import paramiko
-from plumbum import local, SshMachine, FG
-from plumbum.cmd import sudo, git, make
-from plumbum.machines.paramiko_machine import ParamikoMachine
 import multiprocessing
 import os
 import Queue
@@ -16,22 +12,35 @@ import stat
 import sys
 from threading import Thread
 
+import paramiko
+from plumbum import local, SshMachine, FG
+from plumbum.cmd import sudo, git, make
+from plumbum.machines.paramiko_machine import ParamikoMachine
+from termcolor import colored
+
 GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
 GUTS_PATH = '~/.guts'
 GUT_SRC_PATH = os.path.join(GUTS_PATH, 'gut-src')
 GUT_DIST_PATH = os.path.join(GUTS_PATH, 'gut-dist')
+GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 
 threads = []
 shutting_down = False
 
-def ensure_build():
-    if not os.path.exists(gut_dist_path):
-        build()
-
 def out(s):
     sys.stderr.write(s)
     sys.stderr.flush()
+
+def popen_fg_fix(cmd):
+    # There's some sort of bug in plumbum that prevents `& FG` from working with remote sudo commands, I think?
+    proc = cmd.popen()
+    while True:
+        line = proc.stdout.readline()
+        if line != '':
+            out(colored(line, 'grey', attrs=['bold']))
+        else:
+            break
 
 def rename_git_to_gut_recursive(root_path):
     def rename_git_to_gut(s):
@@ -74,18 +83,23 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             dirs.append(folder)
 
-# def install_build_deps():
-#     if sys.platform == 'darwin':
-#         local['brew']['install', 'libyaml']()
-#     else:
-#         sudo[local['apt-get']['install', 'gettext', 'libyaml-dev', 'curl', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf']]() #python-pip python-dev
-#         sudo[local['sysctl']['fs.inotify.max_user_watches=1048576']]()
+def install_build_deps(context):
+    out('Installing build dependencies...\n')
+    if context['which']['apt-get'](retcode=None):
+        popen_fg_fix(context['sudo'][context['apt-get']['install', '-y', 'gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools']]) #python-pip python-dev
+        # sudo[context['sysctl']['fs.inotify.max_user_watches=1048576']]()
+    else:
+        context['brew']['install', 'libyaml', 'fswatch']()
+    out('Done.\n')
+
+def ensure_guts_folders(context):
+    context['mkdir']['-p', context.path(GUT_SRC_PATH)]()
+    context['mkdir']['-p', context.path(GUT_DIST_PATH)]()
 
 def gut_prepare(context):
-    guts_path = context.path(GUTS_PATH)
+    ensure_guts_folders(context)
     gut_src_path = context.path(GUT_SRC_PATH)
-    context['mkdir']['-p', guts_path]
-    if not gut_src_path.exists():
+    if not (gut_src_path / '.git').exists():
         out('Cloning %s into %s...' % (GIT_REPO_URL, gut_src_path,))
         context['git']['clone', GIT_REPO_URL, gut_src_path]()
         out(' done.\n')
@@ -103,6 +117,7 @@ def gut_prepare(context):
         out(' done.\n')
 
 def gut_build(context):
+    install_build_deps(context)
     gut_src_path = context.path(GUT_SRC_PATH)
     gut_dist_path = context.path(GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (gut_dist_path,)
@@ -110,42 +125,54 @@ def gut_build(context):
         parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
         out('Building gut using up to %s processes...' % (parallelism,))
         context['make'][install_prefix, '-j', parallelism]()
+        context['make'][install_prefix, '-j', parallelism]()
         context['make'][install_prefix, 'install']()
         out(' done.\nInstalled gut into %s\n' % (gut_dist_path,))
 
-def gut_rev_parse(commitish):
-    return local[gut_exe_path]['rev-parse', commitish](retcode=None).strip()
+def ensure_build(context):
+    if not context.path(GUT_EXE_PATH).exists():
+        out('Need to build gut on %s host.\n' % ('local' if context == local else 'remote',))
+        ensure_guts_folders(context)
+        gut_prepare(local) # <-- we always prepare gut source locally
+        if context != local:
+            local_gut_src_path = '%s/' % (local.path(GUT_SRC_PATH),)
+            remote_gut_src_path = '%s:%s/' % (context.host, context.path(GUT_SRC_PATH),)
+            out('rsyncing %s to %s ...' % (local_gut_src_path, remote_gut_src_path))
+            local['rsync']['-av', '--exclude=.git', '--exclude=t', local_gut_src_path, remote_gut_src_path]()
+            out('done.\n')
+        gut_build(context)
 
-def init(local_path):
+def init(context, _sync_path):
+    gut_exe_path = context.path(GUT_EXE_PATH)
+    sync_path = context.path(_sync_path)
     did_anything = False
-    with local.cwd(local_path):
-        gut = local[gut_exe_path]
+    with context.cwd(sync_path):
+        gut = context[gut_exe_path]
         ensure_build()
-        if not os.path.exists(os.path.join(local_path, '.gut')):
+        if not (sync_path / '.gut').exists():
             out(gut['init']())
             did_anything = True
-        head = gut_rev_parse('HEAD')
+        head = context[gut_exe_path]['rev-parse', 'HEAD'](retcode=None).strip()
         if head == 'HEAD':
             out(gut['commit']['--allow-empty', '--message', 'Initial commit']())
             did_anything = True
     if not did_anything:
-        print('Already initialized gut in %s' % (local_path,))
+        print('Already initialized gut in %s' % (sync_path,))
 
 def watch_for_changes(context, path, event_prefix, event_queue):
     def run():
         try:
             with context.cwd(path):
                 watched_root = context['pwd']().strip()
-                # try inotifywait first:
-                if context['which']['inotifywait'](retcode=None):
-                    # for OSX: context['fswatch']['./']
+                watcher = None
+                if context['which']['inotifywait'](retcode=None).strip():
                     inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
                     watcher = context['inotifywait']['--monitor', '--recursive', '--format', '%w%f']
                     for event in inotify_events:
                         watcher = watcher['--event', event]
                     watcher = watcher['./']
                     watch_type = 'inotifywait'
-                elif context['which']['fswatch'](retcode=None):
+                elif context['which']['fswatch'](retcode=None).strip():
                     watcher = context['fswatch']['./']
                     watch_type = 'fswatch'
                 else:
@@ -179,22 +206,25 @@ def shutdown():
     # out('SHUTTING DOWN\n')
     global shutting_down
     shutting_down = True
-    joinable_threads = [t for t in threads if not t.isDaemon()]
-    for thread in joinable_threads:
-        thread.stop()
-    for thread in joinable_threads:
-        thread.join()
+    # joinable_threads = [t for t in threads if not t.isDaemon()]
+    # for thread in joinable_threads:
+    #     thread.join()
     # out('SHUTDOWN\n')
     sys.exit(0)
 
 def sync(local_path, remote_host, remote_path, use_openssl=False):
-    init(local_path)
     out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
     if use_openssl:
         remote = SshMachine(remote_host)
     else:
         # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
         remote = ParamikoMachine(remote_host, missing_host_policy=paramiko.AutoAddPolicy())
+    ensure_build(local)
+    ensure_build(remote)
+    return
+
+    # init(local, local_path)
+    # init(remote, remote_path)
 
     event_queue = Queue.Queue()
     threads.append(watch_for_changes(local, local_path, 'local', event_queue))
@@ -221,8 +251,8 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
     # remote['stat']['.guts'] & FG
     # run(remote['which']['git'])
     # run(remote['which']['gut'])
-    with local.cwd(local_path):
-        gut = local[gut_exe_path]
+    # with local.cwd(local_path):
+    #     gut = local[gut_exe_path]
 
     # sync(...)
     out('Sync exiting.\n')
