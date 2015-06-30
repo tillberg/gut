@@ -2,12 +2,10 @@
 
 import argparse
 import codecs
-import multiprocessing
 import os
 import Queue
 import re
 import shutil
-import socket
 import stat
 import sys
 from threading import Thread
