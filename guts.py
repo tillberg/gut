@@ -129,17 +129,25 @@ def gut_build(context):
         context['make'][install_prefix, 'install']()
         out(' done.\nInstalled gut into %s\n' % (gut_dist_path,))
 
+def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
+    def get_path_str(context, path):
+        return '%s%s/' % (context.host + ':' if context != local else '', context.path(path),)
+    src_path_str = get_path_str(src_context, src_path)
+    dest_path_str = get_path_str(dest_context, dest_path)
+    out('rsyncing %s to %s ...' % (src_path_str, dest_path_str))
+    rsync = local['rsync']['-a']
+    for exclude in excludes:
+        rsync = rsync['--exclude=%s' % (exclude,)]
+    rsync[src_path_str, dest_path_str]()
+    out(' done.\n')
+
 def ensure_build(context):
     if not context.path(GUT_EXE_PATH).exists():
         out('Need to build gut on %s host.\n' % ('local' if context == local else 'remote',))
         ensure_guts_folders(context)
         gut_prepare(local) # <-- we always prepare gut source locally
         if context != local:
-            local_gut_src_path = '%s/' % (local.path(GUT_SRC_PATH),)
-            remote_gut_src_path = '%s:%s/' % (context.host, context.path(GUT_SRC_PATH),)
-            out('rsyncing %s to %s ...' % (local_gut_src_path, remote_gut_src_path))
-            local['rsync']['-av', '--exclude=.git', '--exclude=t', local_gut_src_path, remote_gut_src_path]()
-            out('done.\n')
+            rsync(local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
         gut_build(context)
 
 def init(context, _sync_path):
@@ -222,6 +230,14 @@ def get_tail_hash(context, sync_path):
             return gut(context)['rev-list', '--max-parents=0', 'HEAD']().strip()
     return None
 
+def assert_folder_empty(context, _path):
+    path = context.path(_path)
+    if path.exists() and ((not path.isdir()) or len(path.list()) > 0):
+        # If it exists, and it's not a directory or not an empty directory, then bail
+        out('Refusing to auto-initialize %s on %s, as it is not an empty directory. Move or delete it manually first.\n' % (
+            path, 'local' if context == local else 'remote'))
+        shutdown()
+
 def sync(local_path, remote_host, remote_path, use_openssl=False):
     out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
     if use_openssl:
@@ -237,11 +253,14 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
     out('local tail: [%s]\n' % (local_tail_hash,))
     out('remote tail: [%s]\n' % (remote_tail_hash,))
     if local_tail_hash and not remote_tail_hash:
-
-        out('Initializing local folder from remote gut repo...\n')
-    elif remote_tail_hash and not local_tail_hash:
+        assert_folder_empty(remote, remote_path)
         out('Initializing remote folder from local gut repo...\n')
+    elif remote_tail_hash and not local_tail_hash:
+        assert_folder_empty(local, local_path)
+        out('Initializing local folder from remote gut repo...\n')
     elif not local_tail_hash and not remote_tail_hash:
+        assert_folder_empty(remote, remote_path)
+        assert_folder_empty(local, local_path)
         out('Initializing both local and remote gut repos...\n')
     elif local_tail_hash == remote_tail_hash:
         out('Detected compatible gut repos. Yay.\n')
