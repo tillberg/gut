@@ -28,6 +28,11 @@ GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 GUTD_BIND_PORT = 34924
 GUTD_CONNECT_PORT = 34925
 
+DEFAULT_GUTIGNORE = '''
+# Added by `guts init`:
+*.lock
+'''.lstrip()
+
 shutting_down = False
 
 def shutdown(exit=True):
@@ -188,6 +193,7 @@ def init(context, _sync_path):
             did_anything = True
         head = gut(context)['rev-parse', 'HEAD'](retcode=None).strip()
         if head == 'HEAD':
+            (sync_path / '.gutignore').write(DEFAULT_GUTIGNORE)
             out(gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
             did_anything = True
     if not did_anything:
@@ -213,7 +219,7 @@ def pipe_to_stderr(stream, name):
 
 def watch_for_changes(context, path, event_prefix, event_queue):
     proc = None
-    with context.cwd(path):
+    with context.cwd(context.path(path)):
         watched_root = context['pwd']().strip()
         watcher = None
         if context['which']['inotifywait'](retcode=None).strip():
@@ -231,7 +237,9 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             sys.exit(1)
         wd_prefix = ('%s:' % (context.host,)) if event_prefix == 'remote' else ''
         out('Using %s to listen for changes in %s%s\n' % (watch_type, wd_prefix, watched_root,))
+        kill_via_pidfile(context, watch_type)
         proc = watcher.popen()
+        save_pidfile(context, watch_type, proc.pid)
     def run():
         try:
             while not shutting_down:
@@ -264,11 +272,22 @@ def run_gut_daemon(context, path):
     pipe_to_stderr(proc.stdout, '%s_daemon_out' % (prefix,))
     pipe_to_stderr(proc.stderr, '%s_daemon_err' % (prefix,))
 
+def pidfile_path(context, process_name):
+    return context.path(os.path.join(GUTS_PATH, '%s.pid' % (process_name,)))
+
+def kill_via_pidfile(context, process_name):
+    context['pkill']['--pidfile', '%s' % (pidfile_path(context, process_name),), process_name](retcode=None)
+
+def save_pidfile(context, process_name, pid):
+    pidfile_path(context, process_name).write('%s' % (pid,))
+
 def run_gut_daemons(local, local_path, remote, remote_path):
     run_gut_daemon(local, local_path)
     run_gut_daemon(remote, remote_path)
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
+    kill_via_pidfile(local, 'autossh')
     proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote.host].popen()
+    save_pidfile(local, 'autossh', proc.pid)
     pipe_to_stderr(proc.stdout, 'autossh_out')
     pipe_to_stderr(proc.stderr, 'autossh_err')
 
@@ -276,7 +295,7 @@ def get_tail_hash(context, sync_path):
     path = context.path(sync_path)
     if (path / '.gut').exists():
         with context.cwd(path):
-            return gut(context)['rev-list', '--max-parents=0', 'HEAD']().strip()
+            return gut(context)['rev-list', '--max-parents=0', 'HEAD'](retcode=None).strip() or None
     return None
 
 def assert_folder_empty(context, _path):
@@ -287,10 +306,14 @@ def assert_folder_empty(context, _path):
             path, 'local' if context == local else 'remote'))
         shutdown()
 
-def commit(context, path):
+def gut_commit(context, path):
     with context.cwd(context.path(path)):
         gut(context)['add', '.', '--all'] & FG
         gut(context)['commit', '--message', 'autocommit'] & FG(None)
+
+def gut_pull(context, path):
+    with context.cwd(context.path(path)):
+        gut(context)['pull', 'origin', '-s', 'recursive', '--strategy-option=theirs'] & FG
 
 def setup_gut_origin(context, path):
     with context.cwd(context.path(path)):
@@ -351,8 +374,9 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
             dest_context = local
             dest_path = local_path
             dest_system = 'local'
-        commit(src_context, src_path)
+        gut_commit(src_context, src_path)
         out('Done.\nPulling changes from %s to %s...' % (src_system, dest_system))
+        gut_pull(local, local_path)
         out('Done.\n')
 
     event_queue = Queue.Queue()
@@ -394,7 +418,6 @@ def main():
     parser.add_argument('--openssl', action='store_true')
     args = parser.parse_args()
     if args.action == 'build':
-        # gut_exe_path = os.path.join(gut_dist_path, 'bin/gut')
         gut_prepare(local)
         gut_build(local)
     else:
@@ -408,8 +431,6 @@ def main():
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
             remote_host, remote_path = args.remote.split(':', 1)
-            # Since we start at the remote home directory by default, we can replace ~/ with ./
-            remote_path = re.sub(r'^~/', './', remote_path)
             sync(local_path, remote_host, remote_path, use_openssl=args.openssl)
 
 if __name__ == '__main__':
