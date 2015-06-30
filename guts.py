@@ -135,11 +135,21 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     src_path_str = get_path_str(src_context, src_path)
     dest_path_str = get_path_str(dest_context, dest_path)
     out('rsyncing %s to %s ...' % (src_path_str, dest_path_str))
+    dest_context['mkdir']['-p', dest_context.path(dest_path)]()
     rsync = local['rsync']['-a']
     for exclude in excludes:
         rsync = rsync['--exclude=%s' % (exclude,)]
     rsync[src_path_str, dest_path_str]()
     out(' done.\n')
+
+def rsync_gut(src_context, src_path, dest_context, dest_path):
+    # rsync just the .gut folder, then reset --hard the destination to the HEAD of the source
+    rsync(src_context, os.path.join(src_path, '.gut'), dest_context, os.path.join(dest_path, '.gut'))
+    with src_context.cwd(src_context.path(src_path)):
+        src_head = gut(src_context)['rev-parse', 'HEAD']().strip()
+    with dest_context.cwd(dest_context.path(dest_path)):
+        out('Doing hard-reset of remote to %s: ' % (src_head,))
+        out(gut(dest_context)['reset', '--hard', src_head]())
 
 def ensure_build(context):
     if not context.path(GUT_EXE_PATH).exists():
@@ -151,18 +161,19 @@ def ensure_build(context):
         gut_build(context)
 
 def init(context, _sync_path):
-    gut_exe_path = context.path(GUT_EXE_PATH)
     sync_path = context.path(_sync_path)
     did_anything = False
+    if not sync_path.exists():
+        context['mkdir']['-p', sync_path]()
+        did_anything = True
     with context.cwd(sync_path):
-        gut = context[gut_exe_path]
-        ensure_build()
+        ensure_build(context)
         if not (sync_path / '.gut').exists():
-            out(gut['init']())
+            out(gut(context)['init']())
             did_anything = True
-        head = context[gut_exe_path]['rev-parse', 'HEAD'](retcode=None).strip()
+        head = gut(context)['rev-parse', 'HEAD'](retcode=None).strip()
         if head == 'HEAD':
-            out(gut['commit']['--allow-empty', '--message', 'Initial commit']())
+            out(gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
             did_anything = True
     if not did_anything:
         print('Already initialized gut in %s' % (sync_path,))
@@ -254,14 +265,20 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
     out('remote tail: [%s]\n' % (remote_tail_hash,))
     if local_tail_hash and not remote_tail_hash:
         assert_folder_empty(remote, remote_path)
-        out('Initializing remote folder from local gut repo...\n')
+        out('Initializing remote repo from local repo...\n')
+        rsync_gut(local, local_path, remote, remote_path)
     elif remote_tail_hash and not local_tail_hash:
         assert_folder_empty(local, local_path)
         out('Initializing local folder from remote gut repo...\n')
+        rsync_gut(remote, remote_path, local, local_path)
     elif not local_tail_hash and not remote_tail_hash:
         assert_folder_empty(remote, remote_path)
         assert_folder_empty(local, local_path)
         out('Initializing both local and remote gut repos...\n')
+        out('Initializing local repo first...\n')
+        init(local, local_path)
+        out('Initializing remote repo from local repo...\n')
+        rsync_gut(local, local_path, remote, remote_path)
     elif local_tail_hash == remote_tail_hash:
         out('Detected compatible gut repos. Yay.\n')
     else:
