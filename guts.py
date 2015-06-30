@@ -157,6 +157,7 @@ def ensure_build(context):
         ensure_guts_folders(context)
         gut_prepare(local) # <-- we always prepare gut source locally
         if context != local:
+            # If we're building remotely, rsync the prepared source to the remote host
             rsync(local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
         gut_build(context)
 
@@ -263,6 +264,7 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
     remote_tail_hash = get_tail_hash(remote, remote_path)
     out('local tail: [%s]\n' % (local_tail_hash,))
     out('remote tail: [%s]\n' % (remote_tail_hash,))
+
     if local_tail_hash and not remote_tail_hash:
         assert_folder_empty(remote, remote_path)
         out('Initializing remote repo from local repo...\n')
@@ -285,40 +287,25 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
         out('Cannot sync incompatible gut repos. Local initial commit hash: [%s]; remote initial commit hash: [%s]\n' % (local_tail_hash, remote_tail_hash))
         shutdown()
 
-
-    return
-    # init(local, local_path)
-    # init(remote, remote_path)
-
     event_queue = Queue.Queue()
     threads.append(watch_for_changes(local, local_path, 'local', event_queue))
     threads.append(watch_for_changes(remote, remote_path, 'remote', event_queue))
+    changed = set()
     while True:
-        recent_changes = False
         try:
-            event = event_queue.get(True, 0.1 if recent_changes else 10000)
+            event = event_queue.get(True, 0.1 if changed else 10000)
         except Queue.Empty:
-            if recent_changes:
-                out('Commit changes.\n')
-                recent_changes = False
+            for system in changed:
+                out('Commit %s changes.\n' % (system,))
+            changed.clear()
         except KeyboardInterrupt:
             shutdown()
             raise
         else:
-            recent_changes = False
             system, path = event
-            out('changed %s %s\n' % (system, path))
+            changed.add(system)
+            # out('changed %s %s\n' % (system, path))
 
-    rguts_path = remote.path(remote_path)
-    # if not rguts_path.exist():
-
-    # remote['stat']['.guts'] & FG
-    # run(remote['which']['git'])
-    # run(remote['which']['gut'])
-    # with local.cwd(local_path):
-    #     gut = local[gut_exe_path]
-
-    # sync(...)
     out('Sync exiting.\n')
 
 def main():
