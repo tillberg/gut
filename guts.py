@@ -48,7 +48,7 @@ def shutdown(exit=True):
         global _shutting_down
         _shutting_down = True
     try:
-        out_dim('\nShutting down guts sync...\n')
+        out_dim('\nAttempting to shut down sub-processes...\n')
         for context, process_name in active_pidfiles:
             out_dim('Killing %s on %s...' % (process_name, context._name))
             retries = 3
@@ -60,6 +60,7 @@ def shutdown(exit=True):
                     if retries <= 0:
                         out_dim(' failed.\n')
                         break
+                    import time
                     time.sleep(1)
                 else:
                     out_dim(' done.\n')
@@ -258,7 +259,7 @@ def pipe_to_stderr(stream, name):
         try:
             while not shutting_down():
                 line = stream.readline()
-                if line != '':
+                if line != '' and not shutting_down():
                     out('[%s] %s' % (name, line))
                 else:
                     break
@@ -318,8 +319,9 @@ def watch_for_changes(context, path, event_prefix, event_queue):
 def run_gut_daemon(context, path):
     proc = None
     repo_path = context.path(path)
-    context['killall']['--quiet', '--user', context.env['USER'], 'gut-daemon'](retcode=None)
-    proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), '--reuseaddr', '--listen=localhost', '--port=%s' % (GUTD_BIND_PORT,), repo_path].popen()
+    kill_via_pidfile(context, 'gut-daemon')
+    pidfile_opt = '--pid-file=%s' % (pidfile_path(context, 'gut-daemon'),)
+    proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (GUTD_BIND_PORT,), repo_path].popen()
     pipe_to_stderr(proc.stdout, '%s_daemon_out' % (context._name,))
     pipe_to_stderr(proc.stderr, '%s_daemon_err' % (context._name,))
 
@@ -327,19 +329,27 @@ def pidfile_path(context, process_name):
     return context.path(os.path.join(GUTS_PATH, '%s.pid' % (process_name,)))
 
 def kill_via_pidfile(context, process_name):
-    context['pkill']['--pidfile', '%s' % (pidfile_path(context, process_name),), process_name](retcode=None)
+    quote(context, context['pkill']['--pidfile', '%s' % (pidfile_path(context, process_name),), process_name](retcode=None))
 
 def save_pidfile(context, process_name, pid):
-    active_pidfiles.append((context, process_name))
-    pidfile_path(context, process_name).write('%s' % (pid,))
+    my_path = pidfile_path(context, process_name)
+    if not pid:
+        pid = context['pgrep']['--newest', process_name]().strip()
+        if pid:
+            out(dim('Using PID of ') + pid + dim(' (from `pgrep --newest ' + process_name + '`) to populate ') + color_path(my_path) + dim('.\n'))
+    if pid:
+        active_pidfiles.append((context, process_name))
+        my_path.write('%s' % (pid,))
+    else:
+        out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name + '\n')
 
 def run_gut_daemons(local, local_path, remote, remote_path):
     run_gut_daemon(local, local_path)
     run_gut_daemon(remote, remote_path)
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
     kill_via_pidfile(local, 'autossh')
+    local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
     proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address].popen()
-    save_pidfile(local, 'autossh', proc.pid)
     pipe_to_stderr(proc.stdout, 'autossh_out')
     pipe_to_stderr(proc.stderr, 'autossh_err')
 
