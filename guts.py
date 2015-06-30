@@ -31,6 +31,7 @@ GUTD_CONNECT_PORT = 34925
 DEFAULT_GUTIGNORE = '''
 # Added by `guts init`:
 *.lock
+.#*
 '''.lstrip()
 
 shutting_down = False
@@ -308,17 +309,24 @@ def assert_folder_empty(context, _path):
 
 def gut_commit(context, path):
     with context.cwd(context.path(path)):
-        gut(context)['add', '.', '--all'] & FG
-        gut(context)['commit', '--message', 'autocommit'] & FG(None)
+        out('Committing on %s host...' % (context._name))
+        gut(context)['add', '--all', './']()
+        gut(context)['commit', '--message', 'autocommit'](retcode=None)
+        out(' done.\n')
 
 def gut_pull(context, path):
     with context.cwd(context.path(path)):
-        gut(context)['pull', 'origin', '-s', 'recursive', '--strategy-option=theirs'] & FG
+        out('Pulling changes to %s host...' % (context._name,))
+        gut(context)['fetch', 'origin']()
+        merge_out = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit']()
+        out(' done.\n')
+        out(merge_out)
 
 def setup_gut_origin(context, path):
     with context.cwd(context.path(path)):
         gut(context)['remote', 'rm', 'origin'](retcode=None)
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (GUTD_CONNECT_PORT,)]()
+        gut(context)['config', 'color.ui', 'always']()
 
 def sync(local_path, remote_host, remote_path, use_openssl=False):
     out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
@@ -327,6 +335,9 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
     else:
         # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
         remote = ParamikoMachine(remote_host, missing_host_policy=paramiko.AutoAddPolicy())
+    local._name = 'local'
+    remote._name = 'remote'
+
     ensure_build(local)
     ensure_build(remote)
 
@@ -357,11 +368,13 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
         out('Cannot sync incompatible gut repos. Local initial commit hash: [%s]; remote initial commit hash: [%s]\n' % (local_tail_hash, remote_tail_hash))
         shutdown()
 
+    run_gut_daemons(local, local_path, remote, remote_path)
+    # The gut daemons are not necessarily listening yet, so this could result in races with gut_pull below
+
     setup_gut_origin(local, local_path)
     setup_gut_origin(remote, remote_path)
 
     def commit_and_update(src_system):
-        out('Committing %s changes...' % (src_system,))
         if src_system == 'local':
             src_context = local
             src_path = local_path
@@ -375,14 +388,15 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
             dest_path = local_path
             dest_system = 'local'
         gut_commit(src_context, src_path)
-        out('Done.\nPulling changes from %s to %s...' % (src_system, dest_system))
-        gut_pull(local, local_path)
-        out('Done.\n')
+        gut_pull(dest_context, dest_path)
 
     event_queue = Queue.Queue()
     watch_for_changes(local, local_path, 'local', event_queue)
     watch_for_changes(remote, remote_path, 'remote', event_queue)
-    run_gut_daemons(local, local_path, remote, remote_path)
+
+    gut_pull(local, local_path)
+    gut_pull(remote, remote_path)
+
     changed = set()
     try:
         while True:
@@ -396,9 +410,9 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
                 system, path = event
                 if not path.startswith('.gut/'):
                     changed.add(system)
-                    out('changed %s %s\n' % (system, path))
-                else:
-                    out('ignoring changed %s %s\n' % (system, path))
+                #     out('changed %s %s\n' % (system, path))
+                # else:
+                #     out('ignoring changed %s %s\n' % (system, path))
     except KeyboardInterrupt:
         shutdown(exit=False)
     except Exception:
