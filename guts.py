@@ -158,7 +158,7 @@ def gut_rev_parse_head(context):
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
-        return '%s%s/' % (context.host + ':' if context != local else '', context.path(path),)
+        return '%s%s/' % (context._ssh_address + ':' if context != local else '', context.path(path),)
     src_path_str = get_path_str(src_context, src_path)
     dest_path_str = get_path_str(dest_context, dest_path)
     out('rsyncing %s to %s ...' % (src_path_str, dest_path_str))
@@ -179,8 +179,8 @@ def rsync_gut(src_context, src_path, dest_context, dest_path):
         out(gut(dest_context)['reset', '--hard', src_head]())
 
 def ensure_build(context):
-    if not context.path(GUT_EXE_PATH).exists():
-        out('Need to build gut on %s host.\n' % ('local' if context == local else 'remote',))
+    if not context.path(GUT_EXE_PATH).exists() or GIT_VERSION.lstrip('v') not in gut(context)['--version']():
+        out('Need to build gut on %s.\n' % (context._name,))
         ensure_guts_folders(context)
         gut_prepare(local) # <-- we always prepare gut source locally
         if context != local:
@@ -246,7 +246,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
         else:
             out('guts requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
             sys.exit(1)
-        wd_prefix = ('%s:' % (context.host,)) if event_prefix == 'remote' else ''
+        wd_prefix = ('%s:' % (context._name,)) if event_prefix == 'remote' else ''
         out('Using %s to listen for changes in %s%s\n' % (watch_type, wd_prefix, watched_root,))
         kill_via_pidfile(context, watch_type)
         proc = watcher.popen()
@@ -278,9 +278,8 @@ def run_gut_daemon(context, path):
     repo_path = context.path(path)
     context['killall']['--quiet', '--user', context.env['USER'], 'gut-daemon'](retcode=None)
     proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), '--reuseaddr', '--listen=localhost', '--port=%s' % (GUTD_BIND_PORT,), repo_path].popen()
-    prefix = 'local' if context == local else 'remote'
-    pipe_to_stderr(proc.stdout, '%s_daemon_out' % (prefix,))
-    pipe_to_stderr(proc.stderr, '%s_daemon_err' % (prefix,))
+    pipe_to_stderr(proc.stdout, '%s_daemon_out' % (context._name,))
+    pipe_to_stderr(proc.stderr, '%s_daemon_err' % (context._name,))
 
 def pidfile_path(context, process_name):
     return context.path(os.path.join(GUTS_PATH, '%s.pid' % (process_name,)))
@@ -296,7 +295,7 @@ def run_gut_daemons(local, local_path, remote, remote_path):
     run_gut_daemon(remote, remote_path)
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
     kill_via_pidfile(local, 'autossh')
-    proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote.host].popen()
+    proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address].popen()
     save_pidfile(local, 'autossh', proc.pid)
     pipe_to_stderr(proc.stdout, 'autossh_out')
     pipe_to_stderr(proc.stderr, 'autossh_err')
@@ -312,14 +311,13 @@ def assert_folder_empty(context, _path):
     path = context.path(_path)
     if path.exists() and ((not path.isdir()) or len(path.list()) > 0):
         # If it exists, and it's not a directory or not an empty directory, then bail
-        out('Refusing to auto-initialize %s on %s, as it is not an empty directory. Move or delete it manually first.\n' % (
-            path, 'local' if context == local else 'remote'))
+        out('Refusing to auto-initialize %s on %s, as it is not an empty directory. Move or delete it manually first.\n' % (path, context._name))
         shutdown()
 
 def gut_commit(context, path):
     with context.cwd(context.path(path)):
         head_before = gut_rev_parse_head(context)
-        out('Committing on %s host...' % (context._name))
+        out('Committing on %s...' % (context._name))
         gut(context)['add', '--all', './']()
         gut(context)['commit', '--message', 'autocommit'](retcode=None)
         head_after = gut_rev_parse_head(context)
@@ -329,7 +327,7 @@ def gut_commit(context, path):
 
 def gut_pull(context, path):
     with context.cwd(context.path(path)):
-        out('Pulling changes to %s host...' % (context._name,))
+        out('Pulling changes to %s...' % (context._name,))
         gut(context)['fetch', 'origin']()
         # If the merge fails due to uncommitted changes, then we should pick them up in the next commit, which should happen very shortly thereafter
         merge_out = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'](retcode=None)
@@ -342,15 +340,17 @@ def setup_gut_origin(context, path):
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (GUTD_CONNECT_PORT,)]()
         gut(context)['config', 'color.ui', 'always']()
 
-def sync(local_path, remote_host, remote_path, use_openssl=False):
-    out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
+def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
+    remote_ssh_address = ('%s@' % (remote_user,) if remote_user else '') + remote_host
+    out('Syncing %s with %s:%s\n' % (local_path, remote_ssh_address, remote_path))
     if use_openssl:
-        remote = SshMachine(remote_host)
+        remote = SshMachine(remote_host, user=remote_user)
     else:
         # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
-        remote = ParamikoMachine(remote_host, missing_host_policy=paramiko.AutoAddPolicy())
-    local._name = 'local'
-    remote._name = 'remote'
+        remote = ParamikoMachine(remote_host, user=remote_user, missing_host_policy=paramiko.AutoAddPolicy())
+    local._name = 'localhost'
+    remote._ssh_address = remote_ssh_address
+    remote._name = remote_host
 
     ensure_build(local)
     ensure_build(remote)
@@ -458,8 +458,9 @@ def main():
         else:
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
-            remote_host, remote_path = args.remote.split(':', 1)
-            sync(local_path, remote_host, remote_path, use_openssl=args.openssl)
+            remote_addr, remote_path = args.remote.split(':', 1)
+            remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
+            sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
 
 if __name__ == '__main__':
     main()
