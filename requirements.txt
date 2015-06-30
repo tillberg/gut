@@ -1,3 +1,2 @@
 plumbum
 paramiko
-termcolor

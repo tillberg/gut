@@ -16,7 +16,6 @@ import paramiko
 from plumbum import local, SshMachine, FG
 from plumbum.cmd import sudo, git, make
 from plumbum.machines.paramiko_machine import ParamikoMachine
-from termcolor import colored
 
 GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
@@ -37,16 +36,24 @@ DEFAULT_GUTIGNORE = '''
 shutting_down = False
 
 def shutdown(exit=True):
-    # out('SHUTTING DOWN\n')
     global shutting_down
     shutting_down = True
-    # out('SHUTDOWN\n')
     if exit:
         sys.exit(1)
 
-def out(s):
-    sys.stderr.write(s)
+def out(text):
+    sys.stderr.write(text)
     sys.stderr.flush()
+
+def out_dim(text):
+    reset_all = '\033[m'
+    bright = '\033[1m'
+    dim = '\033[2m'
+    reset_color = '\033[39m'
+    text = text.replace(reset_all, reset_all + dim)
+    text = text.replace(reset_color, reset_color + dim)
+    text = text.replace(bright, '')
+    out(dim + text + reset_all)
 
 def popen_fg_fix(cmd):
     # There's some sort of bug in plumbum that prevents `& FG` from working with remote sudo commands, I think?
@@ -54,7 +61,7 @@ def popen_fg_fix(cmd):
     while True:
         line = proc.stdout.readline()
         if line != '':
-            out(colored(line, 'grey', attrs=['bold']))
+            out_dim(line)
         else:
             break
 
@@ -146,6 +153,9 @@ def gut_build(context):
         context['make'][install_prefix, 'install']()
         out(' done.\nInstalled gut into %s\n' % (gut_dist_path,))
 
+def gut_rev_parse_head(context):
+    return gut(context)['rev-parse', 'HEAD']().strip()
+
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
         return '%s%s/' % (context.host + ':' if context != local else '', context.path(path),)
@@ -163,7 +173,7 @@ def rsync_gut(src_context, src_path, dest_context, dest_path):
     # rsync just the .gut folder, then reset --hard the destination to the HEAD of the source
     rsync(src_context, os.path.join(src_path, '.gut'), dest_context, os.path.join(dest_path, '.gut'))
     with src_context.cwd(src_context.path(src_path)):
-        src_head = gut(src_context)['rev-parse', 'HEAD']().strip()
+        src_head = gut_rev_parse_head(src_context)
     with dest_context.cwd(dest_context.path(dest_path)):
         out('Doing hard-reset of remote to %s: ' % (src_head,))
         out(gut(dest_context)['reset', '--hard', src_head]())
@@ -192,7 +202,7 @@ def init(context, _sync_path):
         if not (sync_path / '.gut').exists():
             out(gut(context)['init']())
             did_anything = True
-        head = gut(context)['rev-parse', 'HEAD'](retcode=None).strip()
+        head = gut_rev_parse_head(context)
         if head == 'HEAD':
             (sync_path / '.gutignore').write(DEFAULT_GUTIGNORE)
             out(gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
@@ -258,7 +268,6 @@ def watch_for_changes(context, path, event_prefix, event_queue):
         except Exception:
             if not shutting_down:
                 raise
-        # print >> sys.stderr, 'watch_for_changes exiting'
     thread = Thread(target=run)
     thread.daemon = True
     thread.start()
@@ -309,18 +318,23 @@ def assert_folder_empty(context, _path):
 
 def gut_commit(context, path):
     with context.cwd(context.path(path)):
+        head_before = gut_rev_parse_head(context)
         out('Committing on %s host...' % (context._name))
         gut(context)['add', '--all', './']()
         gut(context)['commit', '--message', 'autocommit'](retcode=None)
-        out(' done.\n')
+        head_after = gut_rev_parse_head(context)
+        made_a_commit = head_before != head_after
+        out(' done (%s).\n' % ('sha1 %s' % (head_after[:7],) if made_a_commit else 'no changes',))
+        return made_a_commit
 
 def gut_pull(context, path):
     with context.cwd(context.path(path)):
         out('Pulling changes to %s host...' % (context._name,))
         gut(context)['fetch', 'origin']()
-        merge_out = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit']()
+        # If the merge fails due to uncommitted changes, then we should pick them up in the next commit, which should happen very shortly thereafter
+        merge_out = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'](retcode=None)
         out(' done.\n')
-        out(merge_out)
+        out_dim(merge_out)
 
 def setup_gut_origin(context, path):
     with context.cwd(context.path(path)):
@@ -387,15 +401,15 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
             dest_context = local
             dest_path = local_path
             dest_system = 'local'
-        gut_commit(src_context, src_path)
-        gut_pull(dest_context, dest_path)
+        if gut_commit(src_context, src_path):
+            gut_pull(dest_context, dest_path)
 
     event_queue = Queue.Queue()
     watch_for_changes(local, local_path, 'local', event_queue)
     watch_for_changes(remote, remote_path, 'remote', event_queue)
 
-    gut_pull(local, local_path)
-    gut_pull(remote, remote_path)
+    commit_and_update('remote')
+    commit_and_update('local')
 
     changed = set()
     try:
