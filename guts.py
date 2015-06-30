@@ -25,8 +25,18 @@ GUT_SRC_PATH = os.path.join(GUTS_PATH, 'gut-src')
 GUT_DIST_PATH = os.path.join(GUTS_PATH, 'gut-dist')
 GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 
-threads = []
+GUTD_BIND_PORT = 34924
+GUTD_CONNECT_PORT = 34925
+
 shutting_down = False
+
+def shutdown(exit=True):
+    # out('SHUTTING DOWN\n')
+    global shutting_down
+    shutting_down = True
+    # out('SHUTDOWN\n')
+    if exit:
+        sys.exit(1)
 
 def out(s):
     sys.stderr.write(s)
@@ -84,12 +94,13 @@ def rename_git_to_gut_recursive(root_path):
             dirs.append(folder)
 
 def install_build_deps(context):
+    # XXX This ought to either be moved to a README or be made properly interactive.
     out('Installing build dependencies...\n')
     if context['which']['apt-get'](retcode=None):
-        popen_fg_fix(context['sudo'][context['apt-get']['install', '-y', 'gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools']]) #python-pip python-dev
+        popen_fg_fix(context['sudo'][context['apt-get']['install', '-y', 'gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']]) #python-pip python-dev
         # sudo[context['sysctl']['fs.inotify.max_user_watches=1048576']]()
     else:
-        context['brew']['install', 'libyaml', 'fswatch']()
+        context['brew']['install', 'libyaml', 'fswatch', 'autossh']()
     out('Done.\n')
 
 def ensure_guts_folders(context):
@@ -161,6 +172,9 @@ def ensure_build(context):
             rsync(local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
         gut_build(context)
 
+def gut(context):
+    return context[context.path(GUT_EXE_PATH)]
+
 def init(context, _sync_path):
     sync_path = context.path(_sync_path)
     did_anything = False
@@ -179,61 +193,84 @@ def init(context, _sync_path):
     if not did_anything:
         print('Already initialized gut in %s' % (sync_path,))
 
-def watch_for_changes(context, path, event_prefix, event_queue):
+def pipe_to_stderr(stream, name):
     def run():
         try:
-            with context.cwd(path):
-                watched_root = context['pwd']().strip()
-                watcher = None
-                if context['which']['inotifywait'](retcode=None).strip():
-                    inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
-                    watcher = context['inotifywait']['--monitor', '--recursive', '--format', '%w%f']
-                    for event in inotify_events:
-                        watcher = watcher['--event', event]
-                    watcher = watcher['./']
-                    watch_type = 'inotifywait'
-                elif context['which']['fswatch'](retcode=None).strip():
-                    watcher = context['fswatch']['./']
-                    watch_type = 'fswatch'
+            while not shutting_down:
+                line = stream.readline()
+                if line != '':
+                    out('[%s] %s' % (name, line))
                 else:
-                    out('guts requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
-                    sys.exit(1)
-                wd_prefix = ('%s:' % (context.host,)) if event_prefix == 'remote' else ''
-                out('Using %s to listen for changes in %s%s\n' % (watch_type, wd_prefix, watched_root,))
-                proc = watcher.popen()
-                while not shutting_down:
-                    line = proc.stdout.readline()
-                    if line != '':
-                        changed_path = line.rstrip()
-                        changed_path = os.path.abspath(os.path.join(watched_root, changed_path))
-                        rel_path = os.path.relpath(changed_path, watched_root)
-                        # out('changed_path: ' + changed_path + '\n')
-                        # out('watched_root: ' + watched_root + '\n')
-                        # out('changed ' + changed_path + ' -> ' + rel_path + '\n')
-                        event_queue.put((event_prefix, rel_path))
-                    else:
-                        break
-        except socket.error:
+                    break
+        except Exception:
+            if not shutting_down:
+                raise
+        if not shutting_down:
+            out('%s exited.\n' % (name,))
+    thread = Thread(target=run)
+    thread.daemon = True
+    thread.start()
+
+def watch_for_changes(context, path, event_prefix, event_queue):
+    proc = None
+    with context.cwd(path):
+        watched_root = context['pwd']().strip()
+        watcher = None
+        if context['which']['inotifywait'](retcode=None).strip():
+            inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
+            watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '.gut/']
+            for event in inotify_events:
+                watcher = watcher['--event', event]
+            watcher = watcher['./']
+            watch_type = 'inotifywait'
+        elif context['which']['fswatch'](retcode=None).strip():
+            watcher = context['fswatch']['./']
+            watch_type = 'fswatch'
+        else:
+            out('guts requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
+            sys.exit(1)
+        wd_prefix = ('%s:' % (context.host,)) if event_prefix == 'remote' else ''
+        out('Using %s to listen for changes in %s%s\n' % (watch_type, wd_prefix, watched_root,))
+        proc = watcher.popen()
+    def run():
+        try:
+            while not shutting_down:
+                line = proc.stdout.readline()
+                if line != '':
+                    changed_path = line.rstrip()
+                    changed_path = os.path.abspath(os.path.join(watched_root, changed_path))
+                    rel_path = os.path.relpath(changed_path, watched_root)
+                    # out('changed_path: ' + changed_path + '\n')
+                    # out('watched_root: ' + watched_root + '\n')
+                    # out('changed ' + changed_path + ' -> ' + rel_path + '\n')
+                    event_queue.put((event_prefix, rel_path))
+                else:
+                    break
+        except Exception:
             if not shutting_down:
                 raise
         # print >> sys.stderr, 'watch_for_changes exiting'
     thread = Thread(target=run)
     thread.daemon = True
     thread.start()
-    return thread
+    pipe_to_stderr(proc.stderr, 'watch_%s_err' % (event_prefix,))
 
-def shutdown():
-    # out('SHUTTING DOWN\n')
-    global shutting_down
-    shutting_down = True
-    # joinable_threads = [t for t in threads if not t.isDaemon()]
-    # for thread in joinable_threads:
-    #     thread.join()
-    # out('SHUTDOWN\n')
-    sys.exit(0)
+def run_gut_daemon(context, path):
+    proc = None
+    repo_path = context.path(path)
+    context['killall']['--quiet', '--user', context.env['USER'], 'gut-daemon'](retcode=None)
+    proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), '--reuseaddr', '--listen=localhost', '--port=%s' % (GUTD_BIND_PORT,), repo_path].popen()
+    prefix = 'local' if context == local else 'remote'
+    pipe_to_stderr(proc.stdout, '%s_daemon_out' % (prefix,))
+    pipe_to_stderr(proc.stderr, '%s_daemon_err' % (prefix,))
 
-def gut(context):
-    return context[context.path(GUT_EXE_PATH)]
+def run_gut_daemons(local, local_path, remote, remote_path):
+    run_gut_daemon(local, local_path)
+    run_gut_daemon(remote, remote_path)
+    ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
+    proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote.host].popen()
+    pipe_to_stderr(proc.stdout, 'autossh_out')
+    pipe_to_stderr(proc.stderr, 'autossh_err')
 
 def get_tail_hash(context, sync_path):
     path = context.path(sync_path)
@@ -249,6 +286,16 @@ def assert_folder_empty(context, _path):
         out('Refusing to auto-initialize %s on %s, as it is not an empty directory. Move or delete it manually first.\n' % (
             path, 'local' if context == local else 'remote'))
         shutdown()
+
+def commit(context, path):
+    with context.cwd(context.path(path)):
+        gut(context)['add', '.', '--all'] & FG
+        gut(context)['commit', '--message', 'autocommit'] & FG(None)
+
+def setup_gut_origin(context, path):
+    with context.cwd(context.path(path)):
+        gut(context)['remote', 'rm', 'origin'](retcode=None)
+        gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (GUTD_CONNECT_PORT,)]()
 
 def sync(local_path, remote_host, remote_path, use_openssl=False):
     out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
@@ -287,25 +334,52 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
         out('Cannot sync incompatible gut repos. Local initial commit hash: [%s]; remote initial commit hash: [%s]\n' % (local_tail_hash, remote_tail_hash))
         shutdown()
 
-    event_queue = Queue.Queue()
-    threads.append(watch_for_changes(local, local_path, 'local', event_queue))
-    threads.append(watch_for_changes(remote, remote_path, 'remote', event_queue))
-    changed = set()
-    while True:
-        try:
-            event = event_queue.get(True, 0.1 if changed else 10000)
-        except Queue.Empty:
-            for system in changed:
-                out('Commit %s changes.\n' % (system,))
-            changed.clear()
-        except KeyboardInterrupt:
-            shutdown()
-            raise
-        else:
-            system, path = event
-            changed.add(system)
-            # out('changed %s %s\n' % (system, path))
+    setup_gut_origin(local, local_path)
+    setup_gut_origin(remote, remote_path)
 
+    def commit_and_update(src_system):
+        out('Committing %s changes...' % (src_system,))
+        if src_system == 'local':
+            src_context = local
+            src_path = local_path
+            dest_context = remote
+            dest_path = remote_path
+            dest_system = 'remote'
+        else:
+            src_context = remote
+            src_path = remote_path
+            dest_context = local
+            dest_path = local_path
+            dest_system = 'local'
+        commit(src_context, src_path)
+        out('Done.\nPulling changes from %s to %s...' % (src_system, dest_system))
+        out('Done.\n')
+
+    event_queue = Queue.Queue()
+    watch_for_changes(local, local_path, 'local', event_queue)
+    watch_for_changes(remote, remote_path, 'remote', event_queue)
+    run_gut_daemons(local, local_path, remote, remote_path)
+    changed = set()
+    try:
+        while True:
+            try:
+                event = event_queue.get(True, 0.1 if changed else 10000)
+            except Queue.Empty:
+                for system in changed:
+                    commit_and_update(system)
+                changed.clear()
+            else:
+                system, path = event
+                if not path.startswith('.gut/'):
+                    changed.add(system)
+                    out('changed %s %s\n' % (system, path))
+                else:
+                    out('ignoring changed %s %s\n' % (system, path))
+    except KeyboardInterrupt:
+        shutdown(exit=False)
+    except Exception:
+        shutdown(exit=False)
+        raise
     out('Sync exiting.\n')
 
 def main():
