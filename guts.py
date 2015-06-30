@@ -212,6 +212,16 @@ def shutdown():
     # out('SHUTDOWN\n')
     sys.exit(0)
 
+def gut(context):
+    return context[context.path(GUT_EXE_PATH)]
+
+def get_tail_hash(context, sync_path):
+    path = context.path(sync_path)
+    if (path / '.gut').exists():
+        with context.cwd(path):
+            return gut(context)['rev-list', '--max-parents=0', 'HEAD']().strip()
+    return None
+
 def sync(local_path, remote_host, remote_path, use_openssl=False):
     out('Syncing %s with %s:%s\n' % (local_path, remote_host, remote_path))
     if use_openssl:
@@ -221,8 +231,26 @@ def sync(local_path, remote_host, remote_path, use_openssl=False):
         remote = ParamikoMachine(remote_host, missing_host_policy=paramiko.AutoAddPolicy())
     ensure_build(local)
     ensure_build(remote)
-    return
 
+    local_tail_hash = get_tail_hash(local, local_path)
+    remote_tail_hash = get_tail_hash(remote, remote_path)
+    out('local tail: [%s]\n' % (local_tail_hash,))
+    out('remote tail: [%s]\n' % (remote_tail_hash,))
+    if local_tail_hash and not remote_tail_hash:
+
+        out('Initializing local folder from remote gut repo...\n')
+    elif remote_tail_hash and not local_tail_hash:
+        out('Initializing remote folder from local gut repo...\n')
+    elif not local_tail_hash and not remote_tail_hash:
+        out('Initializing both local and remote gut repos...\n')
+    elif local_tail_hash == remote_tail_hash:
+        out('Detected compatible gut repos. Yay.\n')
+    else:
+        out('Cannot sync incompatible gut repos. Local initial commit hash: [%s]; remote initial commit hash: [%s]\n' % (local_tail_hash, remote_tail_hash))
+        shutdown()
+
+
+    return
     # init(local, local_path)
     # init(remote, remote_path)
 
