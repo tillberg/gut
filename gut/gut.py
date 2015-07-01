@@ -196,7 +196,10 @@ def gut_build(context):
     install_prefix = 'prefix=%s' % (gut_dist_path,)
     with context.cwd(gut_src_path):
         parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
-        out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
+        out(dim('Configuring Makefile for gut...'))
+        context['make'][install_prefix, 'configure']()
+        context[gut_src_path / 'configure'][install_prefix]()
+        out(dim(' done.\nBuilding gut using up to ') + parallelism + dim(' processes...'))
         context['make'][install_prefix, '-j', parallelism]()
         out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
         context['make'][install_prefix, 'install']()
@@ -421,10 +424,8 @@ def setup_gut_origin(context, path):
         gut(context)['config', 'user.name', 'gut-sync']()
         gut(context)['config', 'user.email', 'gut-sync@nowhere.com']()
 
-def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
+def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False):
     try:
-        local = plumbum.local
-        local._name = color_host('localhost')
         local._ssh_address = ''
         remote_ssh_address = ('%s@' % (remote_user,) if remote_user else '') + remote_host
         if use_openssl:
@@ -540,23 +541,26 @@ def main():
             local._name = color_host('localhost')
             ensure_build(local)
             os.execv(gut_exe_path, args)
-    elif action == 'build':
-        if not ensure_build(plumbum.local):
-            out(dim('gut ') + GIT_VERSION + dim(' has already been built.\n'))
     else:
-        parser = argparse.ArgumentParser()
-        parser.add_argument('action', choices=['sync'])
-        parser.add_argument('local')
-        parser.add_argument('remote')
-        # parser.add_argument('--verbose', '-v', action='count')
-        parser.add_argument('--openssl', action='store_true')
-        args = parser.parse_args()
-        local_path = args.local
-        if ':' not in args.remote:
-            parser.error('remote must include both the hostname and path, separated by a colon')
-        remote_addr, remote_path = args.remote.split(':', 1)
-        remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-        sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
+        local = plumbum.local
+        local._name = color_host('localhost')
+        if action == 'build':
+            if not ensure_build(local):
+                out(dim('gut ') + GIT_VERSION + dim(' has already been built.\n'))
+        else:
+            parser = argparse.ArgumentParser()
+            parser.add_argument('action', choices=['sync'])
+            parser.add_argument('local')
+            parser.add_argument('remote')
+            # parser.add_argument('--verbose', '-v', action='count')
+            parser.add_argument('--openssl', action='store_true')
+            args = parser.parse_args()
+            local_path = args.local
+            if ':' not in args.remote:
+                parser.error('remote must include both the hostname and path, separated by a colon')
+            remote_addr, remote_path = args.remote.split(':', 1)
+            remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
+            sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
 
 if __name__ == '__main__':
     main()

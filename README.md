@@ -17,26 +17,39 @@ patched to support N remotes) in real-time.
 Getting Started
 ===============
 
-Install gut via pip. Depending on your system you may need to prepend "sudo":
+First, install `gut` via pip.
 
 ```sh
-> pip install gut
+$ pip install gut
 ```
 
-or
+Depending on your system you may need to prepend "sudo":
 
 ```sh
-> sudo pip install gut
+$ sudo pip install gut
 ```
 
-This installs a command-line utility called `gut`. gut acts like a complete clone
-of git, except that it has a "u" in the place of the "i", and that includes an
-additional `gut-sync` command.
+Next, to build `gut`:
+
+```sh
+$ gut build
+Need to build gut on localhost.
+Cloning https://github.com/git/git.git into /home/ubuntu/.gut/gut-src... done.
+Checking out fresh copy of git v2.4.5... done.
+Rewriting git to gut... done.
+Configuring Makefile for gut... done.
+Building gut using up to 4 processes... installing to /home/ubuntu/.gut/gut-build... done.
+```
+
+(TODO: installing dependencies)
+
+This clones git, rewrites it to gut, then builds it locally. `gut` will be rebuilt
+the first time that you sync to each remote host, as well.
 
 Here's how `gut-sync` works.
 
 ```sh
-> gut sync ~/work my.server.com:~/work
+$ gut sync ~/work my.server.com:~/work
 ```
 
 This command sets up a gut repo locally in ~/work and clones it to your ~/work
@@ -53,11 +66,11 @@ Gut is like Git, but with more U and less I
 You can also use gut just like you'd use git, if you wanted:
 
 ```sh
-> gut init
+$ gut init
 Initialized empty Gut repository in /tmp/test/.gut/
-> touch README
-> gut add README
-> gut commit -m 'First gut commit'
+$ touch README
+$ gut add README
+$ gut commit -m 'First gut commit'
 [master (root-commit) f216bb4] First gut commit
  1 file changed, 0 insertions(+), 0 deletions(-)
  create mode 100644 README
@@ -74,7 +87,7 @@ You'll probably have a tough time speaking to remote git repos, though. Github,
 for one, doesn't support `gut-receive-pack`. :)
 
 ```sh
-> gut push -u origin master
+$ gut push -u origin master
 Invalid command: 'gut-receive-pack 'tillberg/test.git''
   You appear to be using ssh to clone a git:// URL.
   Make sure your core.gitProxy config option and the
