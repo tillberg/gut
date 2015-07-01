@@ -34,7 +34,6 @@ DEFAULT_GUTIGNORE = '''
 
 _shutting_down = False
 _shutting_down_lock = Lock()
-
 active_pidfiles = []
 
 def shutting_down():
@@ -46,7 +45,8 @@ def shutdown(exit=True):
         global _shutting_down
         _shutting_down = True
     try:
-        out('\n')
+        if active_pidfiles:
+            out('\n')
         # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
             out_dim('Shutting down %s on %s...' % (process_name, context._name))
@@ -69,22 +69,15 @@ def shutdown(exit=True):
     if exit:
         sys.exit(1)
 
-def out(text):
-    sys.stdout.write(text)
-    sys.stdout.flush()
-
 def ansi(num):
     return '\033[%sm' % (num,)
+
 RE_ANSI = re.compile('\033\[\d*m')
 ANSI_RESET_ALL = ansi('')
 ANSI_RESET_COLOR = ansi(39)
-ANSI_BRIGHT = ansi(1)
 ANSI_DIM = ansi(2)
-
-def out_dim(text):
-    out(dim(text))
-
 ANSI_COLORS = {'grey': 30, 'red': 31, 'green': 32, 'yellow': 33, 'blue': 34, 'magenta': 35, 'cyan': 36, 'white': 37}
+
 def colored(color):
     def _colored(text):
         return ansi(ANSI_COLORS[color]) + unicode(text) + ANSI_RESET_COLOR
@@ -97,8 +90,12 @@ color_error = colored('red')
 def dim(text):
     return ANSI_DIM + unicode(text) + ANSI_RESET_ALL
 
-def bright(text):
-    return ANSI_BRIGHT + unicode(text) + ANSI_RESET_ALL
+def out(text):
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+def out_dim(text):
+    out(dim(text))
 
 def quote(context, text):
     for line in text.strip().split('\n'):
@@ -464,7 +461,7 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
                 shutdown()
 
         run_gut_daemons(local, local_path, remote, remote_path)
-        # The gut daemons are not necessarily listening yet, so this could result in races with gut_pull below
+        # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
 
         setup_gut_origin(local, local_path)
         setup_gut_origin(remote, remote_path)
@@ -488,6 +485,8 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
         event_queue = Queue.Queue()
         watch_for_changes(local, local_path, 'local', event_queue)
         watch_for_changes(remote, remote_path, 'remote', event_queue)
+        # The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
+        # commit_and_update calls below and the time that the filesystem watches are attached.
 
         commit_and_update('remote')
         commit_and_update('local')
@@ -502,6 +501,7 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
                 changed.clear()
             else:
                 system, path = event
+                # Ignore events inside the .gut folder; these should also be filtered out in inotifywait/fswatch/etc if possible
                 if not path.startswith('.gut/'):
                     changed.add(system)
                 #     out('changed %s %s\n' % (system, path))
