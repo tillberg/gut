@@ -239,6 +239,8 @@ def ensure_build(context):
             # If we're building remotely, rsync the prepared source to the remote host
             rsync(plumbum.local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
         gut_build(context)
+        return True
+    return False
 
 def gut(context):
     return context[context.path(GUT_EXE_PATH)]
@@ -538,6 +540,9 @@ def main():
             local._name = color_host('localhost')
             ensure_build(local)
             os.execv(gut_exe_path, args)
+    elif action == 'build':
+        if not ensure_build(plumbum.local):
+            out(dim('gut ') + GIT_VERSION + dim(' has already been built.\n'))
     else:
         parser = argparse.ArgumentParser()
         parser.add_argument('action', choices=['sync'])
