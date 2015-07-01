@@ -1,12 +1,9 @@
 import os
 from setuptools import setup
 
-def read(fname):
-    return open(os.path.join(os.path.dirname(__file__), fname)).read()
-
 setup(
     name = "gut",
-    version = "0.1.0",
+    version = "0.1.1.dev2",
     author = "Dan Tillberg",
     author_email = "dan@tillberg.us",
     description = ("Realtime bidirectional folder synchronization via modified git"),
@@ -14,7 +11,10 @@ setup(
     keywords = "",
     url = "https://github.com/tillberg/gut",
     packages = ['gut'],
-    long_description = read('README.md'),
+    install_requires=[
+        "plumbum>=1.4.2",
+        "paramiko>=1.15.2",
+    ],
     classifiers = [
         "Development Status :: 3 - Alpha",
         "Environment :: Console",

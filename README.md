@@ -19,17 +19,69 @@ Getting Started
 
 Install gut via pip. Depending on your system you may need to prepend "sudo":
 
-    > pip install gut
+```sh
+> pip install gut
+```
 
-Here's how it works.
+or
 
+```sh
+> sudo pip install gut
+```
 
-    > gut sync ~/work my.server.com:~/work
+This installs a command-line utility called `gut`. gut acts like a complete clone
+of git, except that it has a "u" in the place of the "i", and that includes an
+additional `gut-sync` command.
+
+Here's how `gut-sync` works.
+
+```sh
+> gut sync ~/work my.server.com:~/work
+```
 
 This command sets up a gut repo locally in ~/work and clones it to your ~/work
 directory on my.server.com, then starts watching the filesystem on both ends for
 changes. When a change is made, gut-sync commits the change and then merges it
 to the other server.
 
+...
 
 
+Gut is like Git, but with more U and less I
+===========================================
+
+You can also use gut just like you'd use git, if you wanted:
+
+```sh
+> gut init
+Initialized empty Gut repository in /tmp/test/.gut/
+> touch README
+> gut add README
+> gut commit -m 'First gut commit'
+[master (root-commit) f216bb4] First gut commit
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100644 README
+```
+
+This means that you can use the various `gut`(git) commands, e.g `gut log -p`,
+`gut show HEAD`, `gut log --stat`, and even `gutk` to examine the history of
+whatever `gut-sync` does. So if and when `gut-sync` screws something up, you
+might be able to repair the damage by referencing the gut history and/or doing
+a hard-reset to an older version. (Legal Note: The author(s) of this software
+are not liable for any damage caused by its use. See LICENSE for details.)
+
+You'll probably have a tough time speaking to remote git repos, though. Github,
+for one, doesn't support `gut-receive-pack`. :)
+
+```sh
+> gut push -u origin master
+Invalid command: 'gut-receive-pack 'tillberg/test.git''
+  You appear to be using ssh to clone a git:// URL.
+  Make sure your core.gitProxy config option and the
+  GIT_PROXY_COMMAND environment variable are NOT set.
+fatal: Could not read from remote repository.
+```
+
+The reason it's necessary to use a modified version of git, and not git itself,
+is that stock git will refuse to traverse into .git folders, which is critical
+to using gut-sync to synchronize folders containing git repos.
