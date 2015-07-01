@@ -515,31 +515,29 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    if 'guts' in os.path.basename(sys.argv[0]):
-        # If invoked as "guts", start up a gut-sync session
-        parser.add_argument('local')
-        parser.add_argument('remote')
-        # parser.add_argument('--verbose', '-v', action='count')
-        parser.add_argument('--openssl', action='store_true')
-        args = parser.parse_args()
-        local_path = args.local
-        if ':' not in args.remote:
-            parser.error('remote must include both the hostname and path, separated by a colon')
-        remote_addr, remote_path = args.remote.split(':', 1)
-        remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-        sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
-    else:
-        # If invoked as (presumably) "gut" instead of "guts", then install `gut` and proxy the command to it.
-        gut_exe_path = unicode(plumbum.local.path(GUT_EXE_PATH))
-        args = [gut_exe_path] + sys.argv[1:]
-        try:
-            # Try executing gut; if we get an error on invocation, then try building gut and trying again
-            os.execv(gut_exe_path, args)
-        except OSError:
-            local = plumbum.local
-            local._name = color_host('localhost')
-            ensure_build(local)
-            os.execv(gut_exe_path, args)
+    parser.add_argument('local')
+    parser.add_argument('remote')
+    # parser.add_argument('--verbose', '-v', action='count')
+    parser.add_argument('--openssl', action='store_true')
+    args = parser.parse_args()
+    local_path = args.local
+    if ':' not in args.remote:
+        parser.error('remote must include both the hostname and path, separated by a colon')
+    remote_addr, remote_path = args.remote.split(':', 1)
+    remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
+    sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
+
+def gut_proxy():
+    gut_exe_path = unicode(plumbum.local.path(GUT_EXE_PATH))
+    args = [gut_exe_path] + sys.argv[1:]
+    try:
+        # Try executing gut; if we get an error on invocation, then try building gut and trying again
+        os.execv(gut_exe_path, args)
+    except OSError:
+        local = plumbum.local
+        local._name = color_host('localhost')
+        ensure_build(local)
+        os.execv(gut_exe_path, args)
 
 if __name__ == '__main__':
     main()
