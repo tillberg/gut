@@ -48,9 +48,10 @@ def shutdown(exit=True):
         global _shutting_down
         _shutting_down = True
     try:
-        out_dim('\nAttempting to shut down sub-processes...\n')
+        out('\n')
+        # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
-            out_dim('Killing %s on %s...' % (process_name, context._name))
+            out_dim('Shutting down %s on %s...' % (process_name, context._name))
             retries = 3
             while True:
                 try:
@@ -317,6 +318,10 @@ def watch_for_changes(context, path, event_prefix, event_queue):
     pipe_to_stderr(proc.stderr, 'watch_%s_err' % (event_prefix,))
 
 def run_gut_daemon(context, path):
+    """
+    Start a git-daemon on the host, bound to port GUTD_BIND_PORT on the *localhost* network interface only.
+    `autossh` will create a tunnel to expose this port as GUTD_CONNECT_PORT on the other host.
+    """
     proc = None
     repo_path = context.path(path)
     kill_via_pidfile(context, 'gut-daemon')
@@ -337,7 +342,7 @@ def save_pidfile(context, process_name, pid):
     if not pid:
         pid = context['pgrep']['--newest', process_name]().strip()
         if pid:
-            out(dim('Using PID of ') + pid + dim(' (from `pgrep --newest ' + process_name + '`) to populate ') + color_path(my_path) + dim('.\n'))
+            out(dim('Using PID of ') + pid + dim(' (from `pgrep --newest ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name + dim('.\n'))
     if pid:
         active_pidfiles.append((context, process_name))
         my_path.write('%s' % (pid,))
@@ -356,6 +361,10 @@ def run_gut_daemons(local, local_path, remote, remote_path):
     pipe_to_stderr(proc.stderr, 'autossh_err')
 
 def get_tail_hash(context, sync_path):
+    """
+    Query the gut repo for the initial commit to the repo. We use this to determine if two gut repos are compatibile.
+    http://stackoverflow.com/questions/1006775/how-to-reference-the-initial-commit
+    """
     path = context.path(sync_path)
     if (path / '.gut').exists():
         with context.cwd(path):
@@ -500,33 +509,31 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
         raise
 
 def main():
-    peek_action = sys.argv[1] if len(sys.argv) > 1 else None
-    # parser.add_argument('--verbose', '-v', action='count')
-    parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['init', 'build', 'sync', 'watch'])
-    if peek_action == 'init' or peek_action == 'sync' or peek_action == 'watch':
-        parser.add_argument('local')
-    if peek_action == 'sync':
-        parser.add_argument('remote')
-    parser.add_argument('--openssl', action='store_true')
-    args = parser.parse_args()
     local._name = color_host('localhost')
-    if args.action == 'build':
-        gut_prepare(local)
-        gut_build(local)
-    else:
+    parser = argparse.ArgumentParser()
+    action = sys.argv[1] if len(sys.argv) > 1 else None
+    if action == 'sync':
+        parser.add_argument('action', choices=['sync'])
+        parser.add_argument('local')
+        parser.add_argument('remote')
+        # parser.add_argument('--verbose', '-v', action='count')
+        parser.add_argument('--openssl', action='store_true')
+        args = parser.parse_args()
         local_path = args.local
-        if args.action == 'init':
-            init(local_path)
-        elif args.action == 'watch':
-            for line in iter_fs_watch(local, local_path):
-                out(line + '\n')
+        if ':' not in args.remote:
+            parser.error('remote must include both the hostname and path, separated by a colon')
+        remote_addr, remote_path = args.remote.split(':', 1)
+        remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
+        sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
+    else:
+        # check in ~/.guts/gut-dist/libexec/gut-core/ for a gut-command that we can proxy to
+        gut_action_path = local.path(GUT_DIST_PATH) / 'libexec/gut-core' / ('gut-%s' % (action,))
+        if gut_action_path.exists():
+            gut_exe_path = unicode(local.path(GUT_EXE_PATH))
+            args = [gut_exe_path] + sys.argv[1:]
+            os.execv(gut_exe_path, args)
         else:
-            if ':' not in args.remote:
-                parser.error('remote must include both the hostname and path, separated by a colon')
-            remote_addr, remote_path = args.remote.split(':', 1)
-            remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-            sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
+            out('XXX insert usage help here\n')
 
 if __name__ == '__main__':
     main()
