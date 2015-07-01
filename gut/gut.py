@@ -14,9 +14,9 @@ import plumbum
 
 GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
-GUTS_PATH = '~/.guts'
-GUT_SRC_PATH = os.path.join(GUTS_PATH, 'gut-src')
-GUT_DIST_PATH = os.path.join(GUTS_PATH, 'gut-build')
+GUT_PATH = '~/.gut'
+GUT_SRC_PATH = os.path.join(GUT_PATH, 'gut-src')
+GUT_DIST_PATH = os.path.join(GUT_PATH, 'gut-build')
 GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 
 GUT_HASH_DISPLAY_CHARS = 10
@@ -27,7 +27,7 @@ GUTD_CONNECT_PORT = 34925
 # You can add/remove additional globs to both the root .gutignore and to
 # any other .gutignore file in the repo hierarchy.
 DEFAULT_GUTIGNORE = '''
-# Added by `guts init`:
+# Added by `gut sync` during repo init:
 *.lock
 .#*
 '''.lstrip()
@@ -165,12 +165,12 @@ def install_build_deps(context):
         quote(context, context['brew']['install', 'libyaml', 'fswatch', 'autossh']())
     out_dim('Done.\n')
 
-def ensure_guts_folders(context):
+def ensure_gut_folders(context):
     context['mkdir']['-p', context.path(GUT_SRC_PATH)]()
     context['mkdir']['-p', context.path(GUT_DIST_PATH)]()
 
 def gut_prepare(context):
-    ensure_guts_folders(context)
+    ensure_gut_folders(context)
     gut_src_path = context.path(GUT_SRC_PATH)
     if not (gut_src_path / '.git').exists():
         out(dim('Cloning ') + GIT_REPO_URL + dim(' into ') + color_path(gut_src_path) + dim('...'))
@@ -233,7 +233,7 @@ def rsync_gut(src_context, src_path, dest_context, dest_path):
 def ensure_build(context):
     if not context.path(GUT_EXE_PATH).exists() or GIT_VERSION.lstrip('v') not in gut(context)['--version']():
         out(dim('Need to build gut on ') + context._name + dim('.\n'))
-        ensure_guts_folders(context)
+        ensure_gut_folders(context)
         gut_prepare(plumbum.local) # <-- we always prepare gut source locally
         if context != plumbum.local:
             # If we're building remotely, rsync the prepared source to the remote host
@@ -296,7 +296,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             watcher = context['fswatch']['./']
             watch_type = 'fswatch'
         else:
-            out('guts requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
+            out('gut-sync requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
             sys.exit(1)
         out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._path + '\n')
         kill_via_pidfile(context, watch_type)
@@ -339,7 +339,7 @@ def run_gut_daemon(context, path):
     pipe_quote(proc.stderr, '%s_daemon_err' % (context._name,))
 
 def pidfile_path(context, process_name):
-    return context.path(os.path.join(GUTS_PATH, '%s.pid' % (process_name,)))
+    return context.path(os.path.join(GUT_PATH, '%s.pid' % (process_name,)))
 
 def kill_via_pidfile(context, process_name):
     quote(context, context['pkill']['--pidfile', '%s' % (pidfile_path(context, process_name),), process_name](retcode=None))
@@ -394,11 +394,12 @@ def gut_commit(context, path):
         head_before = gut_rev_parse_head(context)
         out(dim('Checking ') + context._name + dim(' for changes...'))
         gut(context)['add', '--all', './']()
-        commit_out = gut(context)['commit', '--quiet', '--message', 'autocommit'](retcode=None)
+        commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
         head_after = gut_rev_parse_head(context)
         made_a_commit = head_before != head_after
         out(' ' + (('committed ' + color_commit(head_after[:GUT_HASH_DISPLAY_CHARS])) if made_a_commit else 'none') + dim('.\n'))
-        # quote(context, commit_out)
+        if made_a_commit:
+            quote(context, commit_out)
         return made_a_commit
 
 def gut_pull(context, path):
@@ -415,8 +416,8 @@ def setup_gut_origin(context, path):
         gut(context)['remote', 'rm', 'origin'](retcode=None)
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (GUTD_CONNECT_PORT,)]()
         gut(context)['config', 'color.ui', 'always']()
-        gut(context)['config', 'user.name', 'guts']()
-        gut(context)['config', 'user.email', 'guts@nowhere.com']()
+        gut(context)['config', 'user.name', 'gut-sync']()
+        gut(context)['config', 'user.email', 'gut-sync@nowhere.com']()
 
 def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
     try:
@@ -525,30 +526,32 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
         raise
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('local')
-    parser.add_argument('remote')
-    # parser.add_argument('--verbose', '-v', action='count')
-    parser.add_argument('--openssl', action='store_true')
-    args = parser.parse_args()
-    local_path = args.local
-    if ':' not in args.remote:
-        parser.error('remote must include both the hostname and path, separated by a colon')
-    remote_addr, remote_path = args.remote.split(':', 1)
-    remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-    sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
-
-def gut_proxy():
-    gut_exe_path = unicode(plumbum.local.path(GUT_EXE_PATH))
-    args = [gut_exe_path] + sys.argv[1:]
-    try:
-        # Try executing gut; if we get an error on invocation, then try building gut and trying again
-        os.execv(gut_exe_path, args)
-    except OSError:
-        local = plumbum.local
-        local._name = color_host('localhost')
-        ensure_build(local)
-        os.execv(gut_exe_path, args)
+    action = len(sys.argv) >= 2 and sys.argv[1]
+    if action and (plumbum.local.path(GUT_DIST_PATH) / ('libexec/gut-core/gut-%s' % (action,))).exists():
+        gut_exe_path = unicode(plumbum.local.path(GUT_EXE_PATH))
+        args = [gut_exe_path] + sys.argv[1:]
+        try:
+            # Try executing gut; if we get an error on invocation, then try building gut and trying again
+            os.execv(gut_exe_path, args)
+        except OSError:
+            local = plumbum.local
+            local._name = color_host('localhost')
+            ensure_build(local)
+            os.execv(gut_exe_path, args)
+    else:
+        parser = argparse.ArgumentParser()
+        parser.add_argument('action', choices=['sync'])
+        parser.add_argument('local')
+        parser.add_argument('remote')
+        # parser.add_argument('--verbose', '-v', action='count')
+        parser.add_argument('--openssl', action='store_true')
+        args = parser.parse_args()
+        local_path = args.local
+        if ':' not in args.remote:
+            parser.error('remote must include both the hostname and path, separated by a colon')
+        remote_addr, remote_path = args.remote.split(':', 1)
+        remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
+        sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
 
 if __name__ == '__main__':
     main()

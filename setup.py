@@ -5,15 +5,15 @@ def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup(
-    name = "guts",
-    version = "0.0.0",
+    name = "gut",
+    version = "0.1.0",
     author = "Dan Tillberg",
     author_email = "dan@tillberg.us",
     description = ("Realtime bidirectional folder synchronization via modified git"),
     license = "ISC",
-    keywords = "example documentation tutorial",
-    url = "https://github.com/tillberg/guts",
-    packages = ['guts'],
+    keywords = "",
+    url = "https://github.com/tillberg/gut",
+    packages = ['gut'],
     long_description = read('README.md'),
     classifiers = [
         "Development Status :: 3 - Alpha",
@@ -22,8 +22,7 @@ setup(
     ],
     entry_points = {
         'console_scripts': [
-            'guts = guts:main',
-            'gut = guts:gut_proxy',
+            'gut = gut.gut:main',
         ],
     }
 )

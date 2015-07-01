@@ -1,5 +1,5 @@
-guts
-====
+gut
+===
 
 Realtime bidirectional folder synchronization via modified git
 
