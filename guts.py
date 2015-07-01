@@ -227,7 +227,7 @@ def ensure_build(context):
         out(dim('Need to build gut on ') + context._name + dim('.\n'))
         ensure_guts_folders(context)
         gut_prepare(plumbum.local) # <-- we always prepare gut source locally
-        if context != local:
+        if context != plumbum.local:
             # If we're building remotely, rsync the prepared source to the remote host
             rsync(plumbum.local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
         gut_build(context)
@@ -515,9 +515,8 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
 
 def main():
     parser = argparse.ArgumentParser()
-    action = sys.argv[1] if len(sys.argv) > 1 else None
-    if action == 'sync':
-        parser.add_argument('action', choices=['sync'])
+    if 'guts' in os.path.basename(sys.argv[0]):
+        # If invoked as "guts", start up a gut-sync session
         parser.add_argument('local')
         parser.add_argument('remote')
         # parser.add_argument('--verbose', '-v', action='count')
@@ -530,14 +529,17 @@ def main():
         remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
         sync(local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
     else:
-        # check in ~/.guts/gut-dist/libexec/gut-core/ for a gut-command that we can proxy to
-        gut_action_path = local.path(GUT_DIST_PATH) / 'libexec/gut-core' / ('gut-%s' % (action,))
-        if gut_action_path.exists():
-            gut_exe_path = unicode(local.path(GUT_EXE_PATH))
-            args = [gut_exe_path] + sys.argv[1:]
+        # If invoked as (presumably) "gut" instead of "guts", then install `gut` and proxy the command to it.
+        gut_exe_path = unicode(plumbum.local.path(GUT_EXE_PATH))
+        args = [gut_exe_path] + sys.argv[1:]
+        try:
+            # Try executing gut; if we get an error on invocation, then try building gut and trying again
             os.execv(gut_exe_path, args)
-        else:
-            out('XXX insert usage help here\n')
+        except OSError:
+            local = plumbum.local
+            local._name = color_host('localhost')
+            ensure_build(local)
+            os.execv(gut_exe_path, args)
 
 if __name__ == '__main__':
     main()
