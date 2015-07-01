@@ -11,6 +11,7 @@ import sys
 import threading
 
 import plumbum
+from plumbum.commands.processes import ProcessExecutionError
 
 GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
@@ -31,6 +32,13 @@ DEFAULT_GUTIGNORE = '''
 *.lock
 .#*
 '''.lstrip()
+
+DEPENDENCY_ERROR_MAP = {
+    'autoconf: command not found': 'autoconf',
+}
+
+BREW_DEPS = ['libyaml', 'fswatch', 'autossh']
+APT_GET_DEPS = ['gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']
 
 _shutting_down = False
 _shutting_down_lock = threading.Lock()
@@ -106,6 +114,22 @@ def quote(context, text):
         if RE_ANSI.sub('', line).strip():
             out(dim('[') + context._name + dim('] ') + line + '\n')
 
+def missing_dependency(context, name):
+    has_apt_get = context['which']['apt-get'](retcode=None) != ''
+    out(color_error('\n\nYou appear to be missing a required dependency, ') + name + color_error(', on ') + context._name + color_error('.'))
+    out(dim('\nTo install just this dependency, you could try running this:\n$ '))
+    if has_apt_get:
+        out('sudo apt-get install ' + name)
+    else:
+        out('brew install ' + name)
+    out(dim('\n\nOr to install all required dependencies, you could try running this instead:\n$ '))
+    if has_apt_get:
+        out('sudo apt-get install ' + ' '.join(APT_GET_DEPS))
+    else:
+        out('brew install ' + ' '.join(BREW_DEPS))
+    out('\n\n')
+    shutdown()
+
 def rename_git_to_gut_recursive(root_path):
     def rename_git_to_gut(s):
         return s.replace('GIT', 'GUT').replace('Git', 'Gut').replace('git', 'gut')
@@ -155,16 +179,6 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             dirs.append(folder)
 
-def install_build_deps(context):
-    # XXX This ought to either be moved to a README or be made properly interactive.
-    out_dim('Installing build dependencies...\n')
-    if context['which']['apt-get'](retcode=None):
-        quote(context, context['sudo'][context['apt-get']['install', '-y', 'gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']]())
-        # sudo[context['sysctl']['fs.inotify.max_user_watches=1048576']]()
-    else:
-        quote(context, context['brew']['install', 'libyaml', 'fswatch', 'autossh']())
-    out_dim('Done.\n')
-
 def ensure_gut_folders(context):
     context['mkdir']['-p', context.path(GUT_SRC_PATH)]()
     context['mkdir']['-p', context.path(GUT_DIST_PATH)]()
@@ -190,20 +204,25 @@ def gut_prepare(context):
         out_dim(' done.\n')
 
 def gut_build(context):
-    install_build_deps(context)
     gut_src_path = context.path(GUT_SRC_PATH)
     gut_dist_path = context.path(GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (gut_dist_path,)
     with context.cwd(gut_src_path):
         parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
         out(dim('Configuring Makefile for gut...'))
-        context['make'][install_prefix, 'configure']()
-        context[gut_src_path / 'configure'][install_prefix]()
-        out(dim(' done.\nBuilding gut using up to ') + parallelism + dim(' processes...'))
-        context['make'][install_prefix, '-j', parallelism]()
-        out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
-        context['make'][install_prefix, 'install']()
-        out(dim(' done.\n'))
+        try:
+            context['make'][install_prefix, 'configure']()
+            context[gut_src_path / 'configure'][install_prefix]()
+            out(dim(' done.\nBuilding gut using up to ') + parallelism + dim(' processes...'))
+            context['make'][install_prefix, '-j', parallelism]()
+            out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
+            context['make'][install_prefix, 'install']()
+            out(dim(' done.\n'))
+        except ProcessExecutionError as ex:
+            for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
+                if text in ex.stdout or text in ex.stderr:
+                    return missing_dependency(context, name)
+            raise
 
 def gut_rev_parse_head(context):
     return gut(context)['rev-parse', 'HEAD'](retcode=None).strip() or None
