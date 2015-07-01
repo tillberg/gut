@@ -10,9 +10,7 @@ import stat
 import sys
 from threading import Thread, Lock
 
-from plumbum import local, SshMachine
-from plumbum.cmd import sudo, git, make
-from plumbum.machines.session import ShellSessionError
+import plumbum
 
 GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
@@ -56,10 +54,10 @@ def shutdown(exit=True):
             while True:
                 try:
                     kill_via_pidfile(context, process_name)
-                except ShellSessionError:
+                except Exception as ex:
                     retries -= 1
                     if retries <= 0:
-                        out_dim(' failed.\n')
+                        out(color_error(' failed: %s.\n' % (ex,)))
                         break
                     import time
                     time.sleep(1)
@@ -72,8 +70,8 @@ def shutdown(exit=True):
         sys.exit(1)
 
 def out(text):
-    sys.stderr.write(text)
-    sys.stderr.flush()
+    sys.stdout.write(text)
+    sys.stdout.flush()
 
 def ansi(num):
     return '\033[%sm' % (num,)
@@ -201,12 +199,12 @@ def gut_rev_parse_head(context):
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
-        return '%s%s/' % (context._ssh_address + ':' if context != local else '', context.path(path),)
+        return '%s%s%s/' % (context._ssh_address, ':' if context._ssh_address else '', context.path(path),)
     src_path_str = get_path_str(src_context, src_path)
     dest_path_str = get_path_str(dest_context, dest_path)
     out(dim('rsyncing ') + src_context._path + dim(' to ') + dest_context._path + dim('...'))
     dest_context['mkdir']['-p', dest_context.path(dest_path)]()
-    rsync = local['rsync']['-a']
+    rsync = plumbum.local['rsync']['-a']
     for exclude in excludes:
         rsync = rsync['--exclude=%s' % (exclude,)]
     rsync[src_path_str, dest_path_str]()
@@ -214,11 +212,12 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
 
 def rsync_gut(src_context, src_path, dest_context, dest_path):
     # rsync just the .gut folder, then reset --hard the destination to the HEAD of the source
+    # XXX This really ought to be done via starting up gut-daemon on the other host and then doing a gut-clone instead of relying on rsync.
     rsync(src_context, os.path.join(src_path, '.gut'), dest_context, os.path.join(dest_path, '.gut'))
     with src_context.cwd(src_context.path(src_path)):
         src_head = gut_rev_parse_head(src_context)
     with dest_context.cwd(dest_context.path(dest_path)):
-        out(dim('Hard-resetting freshly-synced gut repo in ') + dest_context._path + dim(' to ') + color_commit(src_head) + dim('...'))
+        out(dim('Hard-resetting freshly-synced gut repo in ') + dest_context._path + dim(' to ') + color_commit(src_head[:GUT_HASH_DISPLAY_CHARS]) + dim('...'))
         output = gut(dest_context)['reset', '--hard', src_head]()
         out_dim('done.\n')
         quote(dest_context, output)
@@ -227,10 +226,10 @@ def ensure_build(context):
     if not context.path(GUT_EXE_PATH).exists() or GIT_VERSION.lstrip('v') not in gut(context)['--version']():
         out(dim('Need to build gut on ') + context._name + dim('.\n'))
         ensure_guts_folders(context)
-        gut_prepare(local) # <-- we always prepare gut source locally
+        gut_prepare(plumbum.local) # <-- we always prepare gut source locally
         if context != local:
             # If we're building remotely, rsync the prepared source to the remote host
-            rsync(local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
+            rsync(plumbum.local, GUT_SRC_PATH, context, GUT_SRC_PATH, excludes=['.git', 't'])
         gut_build(context)
 
 def gut(context):
@@ -255,7 +254,7 @@ def init(context, _sync_path):
     if not did_anything:
         print('Already initialized gut in %s' % (sync_path,))
 
-def pipe_to_stderr(stream, name):
+def pipe_quote(stream, name):
     def run():
         try:
             while not shutting_down():
@@ -315,7 +314,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
     thread = Thread(target=run)
     thread.daemon = True
     thread.start()
-    pipe_to_stderr(proc.stderr, 'watch_%s_err' % (event_prefix,))
+    pipe_quote(proc.stderr, 'watch_%s_err' % (event_prefix,))
 
 def run_gut_daemon(context, path):
     """
@@ -328,8 +327,8 @@ def run_gut_daemon(context, path):
     pidfile_opt = '--pid-file=%s' % (pidfile_path(context, 'gut-daemon'),)
     proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (GUTD_BIND_PORT,), repo_path].popen()
     active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
-    pipe_to_stderr(proc.stdout, '%s_daemon_out' % (context._name,))
-    pipe_to_stderr(proc.stderr, '%s_daemon_err' % (context._name,))
+    pipe_quote(proc.stdout, '%s_daemon_out' % (context._name,))
+    pipe_quote(proc.stderr, '%s_daemon_err' % (context._name,))
 
 def pidfile_path(context, process_name):
     return context.path(os.path.join(GUTS_PATH, '%s.pid' % (process_name,)))
@@ -349,16 +348,19 @@ def save_pidfile(context, process_name, pid):
     else:
         out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name + '\n')
 
-def run_gut_daemons(local, local_path, remote, remote_path):
-    run_gut_daemon(local, local_path)
-    run_gut_daemon(remote, remote_path)
+def start_ssh_tunnel(local, remote):
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
     kill_via_pidfile(local, 'autossh')
     local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
     proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address].popen()
     active_pidfiles.append((local, 'autossh')) # autossh writes its own pidfile
-    pipe_to_stderr(proc.stdout, 'autossh_out')
-    pipe_to_stderr(proc.stderr, 'autossh_err')
+    pipe_quote(proc.stdout, 'autossh_out')
+    pipe_quote(proc.stderr, 'autossh_err')
+
+def run_gut_daemons(local, local_path, remote, remote_path):
+    run_gut_daemon(local, local_path)
+    run_gut_daemon(remote, remote_path)
+    start_ssh_tunnel(local, remote)
 
 def get_tail_hash(context, sync_path):
     """
@@ -410,9 +412,12 @@ def setup_gut_origin(context, path):
 
 def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
     try:
+        local = plumbum.local
+        local._name = color_host('localhost')
+        local._ssh_address = ''
         remote_ssh_address = ('%s@' % (remote_user,) if remote_user else '') + remote_host
         if use_openssl:
-            remote = SshMachine(remote_host, user=remote_user)
+            remote = plumbum.SshMachine(remote_host, user=remote_user)
         else:
             # Import paramiko late so that one could use `--openssl` without even installing paramiko
             import paramiko
@@ -509,7 +514,6 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
         raise
 
 def main():
-    local._name = color_host('localhost')
     parser = argparse.ArgumentParser()
     action = sys.argv[1] if len(sys.argv) > 1 else None
     if action == 'sync':
