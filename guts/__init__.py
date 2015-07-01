@@ -8,7 +8,7 @@ import re
 import shutil
 import stat
 import sys
-from threading import Thread, Lock
+import threading
 
 import plumbum
 
@@ -16,7 +16,7 @@ GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
 GUTS_PATH = '~/.guts'
 GUT_SRC_PATH = os.path.join(GUTS_PATH, 'gut-src')
-GUT_DIST_PATH = os.path.join(GUTS_PATH, 'gut-dist')
+GUT_DIST_PATH = os.path.join(GUTS_PATH, 'gut-build')
 GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 
 GUT_HASH_DISPLAY_CHARS = 10
@@ -33,7 +33,7 @@ DEFAULT_GUTIGNORE = '''
 '''.lstrip()
 
 _shutting_down = False
-_shutting_down_lock = Lock()
+_shutting_down_lock = threading.Lock()
 active_pidfiles = []
 
 def shutting_down():
@@ -57,7 +57,7 @@ def shutdown(exit=True):
                 except Exception as ex:
                     retries -= 1
                     if retries <= 0:
-                        out(color_error(' failed: %s.\n' % (ex,)))
+                        out(color_error(' failed: "%s".\n' % (ex,)))
                         break
                     import time
                     time.sleep(1)
@@ -90,9 +90,12 @@ color_error = colored('red')
 def dim(text):
     return ANSI_DIM + unicode(text) + ANSI_RESET_ALL
 
+def color_host_path(context, path):
+    return (context._name + dim(':') if context != plumbum.local else '') + color_path(context.path(path))
+
 def out(text):
-    sys.stdout.write(text)
-    sys.stdout.flush()
+    sys.stderr.write(text)
+    sys.stderr.flush()
 
 def out_dim(text):
     out(dim(text))
@@ -107,12 +110,13 @@ def rename_git_to_gut_recursive(root_path):
     def rename_git_to_gut(s):
         return s.replace('GIT', 'GUT').replace('Git', 'Gut').replace('git', 'gut')
     for root, dirs, files in os.walk(root_path):
-        for filename in files:
-            if filename.startswith('.git'):
+        for orig_filename in files:
+            if orig_filename.startswith('.git'):
                 # don't touch .gitignores or .gitattributes files
                 continue
-            orig_path = os.path.join(root, filename)
-            path = os.path.join(root, rename_git_to_gut(filename))
+            orig_path = os.path.join(root, orig_filename)
+            filename = rename_git_to_gut(orig_filename)
+            path = os.path.join(root, filename)
             if orig_path != path:
                 # print('renaming file %s -> %s' % (orig_path, path))
                 os.rename(orig_path, path)
@@ -123,9 +127,16 @@ def rename_git_to_gut_recursive(root_path):
                     # print('Could not read UTF-8 from %s' % (path,))
                     continue
             contents = rename_git_to_gut(orig_contents)
+            if filename == 'read-cache.c':
+                # This is a special case super-optimized string parse for the 'i' in 'git':
+                contents = contents.replace("rest[1] != 'i' && rest[1] != 'I'", "rest[1] != 'u' && rest[1] != 'U'")
+            if filename == 'GUT-VERSION-GEN':
+                # GUT-VERSION-GEN attempts to use `git` to look at the git repo's history in order to determine the version string.
+                # This prevents gut-gui/GUT-VERSION-GEN from calling `gut` and causing `gut_proxy` from recursively building `gut` in an infinite loop.
+                contents = contents.replace('gut ', 'git ')
             if contents != orig_contents:
                 # print('rewriting %s' % (path,))
-                # Force read-only files to be writable
+                # Force read-only files to be writable so that we can modify them
                 if not os.access(path, os.W_OK):
                     os.chmod(path, stat.S_IWRITE)
                 with codecs.open(path, 'w', 'utf-8') as fd:
@@ -187,9 +198,9 @@ def gut_build(context):
         parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
         out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
         context['make'][install_prefix, '-j', parallelism]()
-        context['make'][install_prefix, '-j', parallelism]()
+        out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
         context['make'][install_prefix, 'install']()
-        out(dim(' done.\nInstalled gut into ') + color_path(gut_dist_path) + '\n')
+        out(dim(' done.\n'))
 
 def gut_rev_parse_head(context):
     return gut(context)['rev-parse', 'HEAD'](retcode=None).strip() or None
@@ -199,7 +210,7 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
         return '%s%s%s/' % (context._ssh_address, ':' if context._ssh_address else '', context.path(path),)
     src_path_str = get_path_str(src_context, src_path)
     dest_path_str = get_path_str(dest_context, dest_path)
-    out(dim('rsyncing ') + src_context._path + dim(' to ') + dest_context._path + dim('...'))
+    out(dim('rsyncing ') + color_host_path(src_context, src_path) + dim(' to ') + color_host_path(dest_context, dest_path) + dim('...'))
     dest_context['mkdir']['-p', dest_context.path(dest_path)]()
     rsync = plumbum.local['rsync']['-a']
     for exclude in excludes:
@@ -265,7 +276,7 @@ def pipe_quote(stream, name):
                 raise
         if not shutting_down():
             out('%s exited.\n' % (name,))
-    thread = Thread(target=run)
+    thread = threading.Thread(target=run)
     thread.daemon = True
     thread.start()
 
@@ -308,7 +319,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
         except Exception:
             if not shutting_down():
                 raise
-    thread = Thread(target=run)
+    thread = threading.Thread(target=run)
     thread.daemon = True
     thread.start()
     pipe_quote(proc.stderr, 'watch_%s_err' % (event_prefix,))
@@ -421,10 +432,10 @@ def sync(local_path, remote_user, remote_host, remote_path, use_openssl=False):
             from plumbum.machines.paramiko_machine import ParamikoMachine
             # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
             remote = ParamikoMachine(remote_host, user=remote_user, missing_host_policy=paramiko.AutoAddPolicy())
-        local._path = color_path(local_path)
+        local._path = color_host_path(local, local_path)
         remote._ssh_address = remote_ssh_address
         remote._name = color_host(remote_host)
-        remote._path = color_host(remote_host) + dim(':') + color_path(remote_path)
+        remote._path = color_host_path(remote, remote_path)
 
         out(dim('Syncing ') + local._path + dim(' with ') + remote._path + '\n')
 
