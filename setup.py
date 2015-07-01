@@ -17,8 +17,8 @@ setup(
     long_description = read('README.md'),
     classifiers = [
         "Development Status :: 3 - Alpha",
-        "Topic :: Utilities",
-        "License :: OSI Approved :: ISC License",
+        "Environment :: Console",
+        "License :: OSI Approved :: ISC License (ISCL)",
     ],
     entry_points = {
         'console_scripts': [
