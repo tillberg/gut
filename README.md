@@ -106,11 +106,12 @@ $ gut commit -m 'First gut commit'
 ```
 
 This means that you can use the various `gut`(git) commands, e.g `gut log -p`,
-`gut show HEAD`, `gut log --stat`, and even `gutk` to examine the history of
-whatever `gut-sync` does. So if and when `gut-sync` screws something up, you
-might be able to repair the damage by referencing the gut history and/or doing
-a hard-reset to an older version. (Legal Note: The author(s) of this software
-are not liable for any damage caused by its use. See LICENSE for details.)
+`gut show HEAD`, `gut log --stat`, and even `gutk` (it's installed at
+"~/.guts/gut-build/bin/gutk") to examine the history of whatever `gut-sync`
+does. So if and when `gut-sync` screws something up, you might be able to repair
+the damage by referencing the gut history and/or doing a hard-reset to an older
+version. (though, ahem... Legal Note: The author(s) of this software are not
+liable for any damage caused by its use. See LICENSE.)
 
 You'll probably have a tough time speaking to remote git repos, though. Github,
 for one, doesn't support `gut-receive-pack`. :)

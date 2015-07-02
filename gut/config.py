@@ -168,4 +168,6 @@ ALL_GUT_COMMANDS = (
     'verify-tag',
     'whatchanged',
     'write-tree',
+
+    'version',
 )
