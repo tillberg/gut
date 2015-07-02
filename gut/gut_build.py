@@ -3,6 +3,8 @@ import shutil
 import stat
 import os
 
+import plumbum
+
 import config
 import deps
 from terminal import out, out_dim, dim, color_path
@@ -69,22 +71,23 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             dirs.append(folder)
 
-def gut_prepare(context):
-    ensure_gut_folders(context)
-    gut_src_path = context.path(config.GUT_SRC_PATH)
+def gut_prepare():
+    local = plumbum.local
+    ensure_gut_folders(local)
+    gut_src_path = local.path(config.GUT_SRC_PATH)
     if not (gut_src_path / '.git').exists():
         out(dim('Cloning ') + config.GIT_REPO_URL + dim(' into ') + color_path(gut_src_path) + dim('...'))
-        context['git']['clone', config.GIT_REPO_URL, gut_src_path]()
+        local['git']['clone', config.GIT_REPO_URL, gut_src_path]()
         out_dim(' done.\n')
-    with context.cwd(gut_src_path):
-        if not context['git']['rev-parse', config.GIT_VERSION](retcode=None).strip():
+    with local.cwd(gut_src_path):
+        if not local['git']['rev-parse', config.GIT_VERSION](retcode=None).strip():
             out(dim('Updating git in order to upgrade to ') + config.GIT_VERSION + dim('...'))
-            context['git']['fetch']()
+            local['git']['fetch']()
             out_dim(' done.\n')
         out(dim('Checking out fresh copy of git ') + config.GIT_VERSION + dim('...'))
-        context['git']['reset', '--hard', config.GIT_VERSION]()
-        context['git']['clean', '-fd']()
-        context['make']['clean']()
+        local['git']['reset', '--hard', config.GIT_VERSION]()
+        local['git']['clean', '-fd']()
+        local['make']['clean']()
         out_dim(' done.\nRewriting git to gut...')
         rename_git_to_gut_recursive('%s' % (gut_src_path,))
         out_dim(' done.\n')

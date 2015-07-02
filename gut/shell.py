@@ -20,7 +20,7 @@ def ensure_build(context):
     if not context.path(config.GUT_EXE_PATH).exists() or config.GIT_VERSION.lstrip('v') not in gut.get_version(context):
         out(dim('Need to build gut on ') + context._name_ansi + dim('.\n'))
         gut_build.ensure_gut_folders(context)
-        gut_build.gut_prepare(plumbum.local) # <-- we always prepare gut source locally
+        gut_build.gut_prepare() # <-- we always prepare gut source locally
         if context != plumbum.local:
             # If we're building remotely, rsync the prepared source to the remote host
             util.rsync(plumbum.local, config.GUT_SRC_PATH, context, config.GUT_SRC_PATH, excludes=['.git', 't'])
