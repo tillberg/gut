@@ -22,7 +22,7 @@ setup(
     ],
     entry_points = {
         'console_scripts': [
-            'gut = gut.gut:main',
+            'gut = gut.shell:main',
         ],
     }
 )
