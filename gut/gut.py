@@ -23,6 +23,7 @@ GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 GUT_HASH_DISPLAY_CHARS = 10
 GUTD_BIND_PORT = 34924
 GUTD_CONNECT_PORT = 34925
+AUTOSSH_MONITOR_PORT = 34927
 
 # Ignore files that are probably transient by default
 # You can add/remove additional globs to both the root .gutignore and to
@@ -35,6 +36,8 @@ DEFAULT_GUTIGNORE = '''
 
 DEPENDENCY_ERROR_MAP = {
     'autoconf: command not found': 'autoconf',
+    'missing fswatch': 'fswatch',
+    'missing inotifywait': 'inotify-tools',
 }
 
 BREW_DEPS = ['libyaml', 'autoconf', 'fswatch', 'autossh']
@@ -229,29 +232,36 @@ def gut_prepare(context):
         rename_git_to_gut_recursive('%s' % (gut_src_path,))
         out_dim(' done.\n')
 
-def retry_method(context, cb):
-    retry = True
-    last_retry = None
-    while retry:
-        retry = False
-        try:
-            cb()
-        except ProcessExecutionError as ex:
-            import traceback
-            for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
-                if text in ex.stdout or text in ex.stderr:
-                    out(color_error(' failed (missing ') + name + color_error(')') + dim('.\n\n'))
-                    traceback.print_exc(file=sys.stderr)
-                    missing_dependency(context, name, retry_failed=(name == last_retry))
-                    out_dim('Retrying...\n')
-                    last_retry = name
-                    retry = True
-                    break
-            if retry:
-                continue
-            out(color_error(' failed') + dim('.\n\n'))
-            raise
+def divine_missing_dependency(exception_text):
+    for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
+        if text in exception_text:
+            return name
+    return None
 
+def retry_method(context, cb):
+    missing_dep_name = None
+    last_missing_dep_name = None
+    while True:
+        try:
+            rval = cb()
+        except ProcessExecutionError as ex:
+            missing_dep_name = divine_missing_dependency(ex.stdout + ex.stderr)
+        except Exception as ex:
+            missing_dep_name = divine_missing_dependency(ex.message)
+        else:
+            break
+        import traceback
+        if missing_dep_name:
+            out(color_error(' failed (missing ') + missing_dep_name + color_error(')') + dim('.\n\n'))
+            traceback.print_exc(file=sys.stderr)
+            missing_dependency(context, missing_dep_name, retry_failed=(missing_dep_name == last_missing_dep_name))
+            out_dim('Retrying...\n')
+            last_missing_dep_name = missing_dep_name
+        else:
+            out(color_error(' failed') + dim('.\n\n'))
+            traceback.print_exc(file=sys.stderr)
+            shutdown()
+    return rval
 
 def gut_build(context):
     gut_src_path = context.path(GUT_SRC_PATH)
@@ -354,24 +364,27 @@ def watch_for_changes(context, path, event_prefix, event_queue):
     proc = None
     with context.cwd(context.path(path)):
         watched_root = context['pwd']().strip()
-        watcher = None
-        if context['which']['inotifywait'](retcode=None).strip():
-            inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
-            watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '.gut/']
-            for event in inotify_events:
-                watcher = watcher['--event', event]
-            watcher = watcher['./']
-            watch_type = 'inotifywait'
-        elif context['which']['fswatch'](retcode=None).strip():
-            watcher = context['fswatch']['./']
-            watch_type = 'fswatch'
-        else:
-            out('gut-sync requires inotifywait or fswatch to be installed on both the local and remote hosts (missing on %s).\n' % (event_prefix,))
-            sys.exit(1)
-        out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._path + '\n')
-        kill_via_pidfile(context, watch_type)
-        proc = watcher.popen()
-        save_pidfile(context, watch_type, proc.pid)
+        def run_watcher():
+            watcher = None
+            if context['which']['inotifywait'](retcode=None).strip():
+                inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
+                watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '.gut/']
+                for event in inotify_events:
+                    watcher = watcher['--event', event]
+                watcher = watcher['./']
+                watch_type = 'inotifywait'
+            elif context['which']['fswatch'](retcode=None).strip():
+                watcher = context['fswatch']['./']
+                watch_type = 'fswatch'
+            else:
+                is_osx = 'Darwin' in context['uname']()
+                raise Exception('missing ' + ('fswatch' if is_osx else 'inotifywait'))
+            out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._path + '\n')
+            kill_via_pidfile(context, watch_type)
+            proc = watcher.popen()
+            save_pidfile(context, watch_type, proc.pid)
+            return proc
+        proc = retry_method(context, run_watcher)
     def run():
         try:
             while not shutting_down():
@@ -432,7 +445,9 @@ def start_ssh_tunnel(local, remote):
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
     kill_via_pidfile(local, 'autossh')
     local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
-    proc = local['autossh']['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address].popen()
+    autossh = local['autossh']
+    autossh = autossh['-M', AUTOSSH_MONITOR_PORT, '-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
+    proc = autossh.popen()
     active_pidfiles.append((local, 'autossh')) # autossh writes its own pidfile
     pipe_quote(proc.stdout, 'autossh_out')
     pipe_quote(proc.stderr, 'autossh_err')
