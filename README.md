@@ -96,6 +96,20 @@ $ gut log --stat
 
 To exclude files from gut-sync, use `.gutignore` just as you'd use `.gitignore` over in git-world.
 
+SSH Authentication Issues
+=========================
+
+By default, `gut-sync` uses paramiko to make the primary SSH connection to the remote host. If you
+have trouble connection/authenticating, try specifying `--use-openssl`. The OpenSSL-based plumbum
+machinery isn't quite as fast/efficient as paramiko, but it might work for you.
+
+Supported OSes
+==============
+
+`gut` has been tested and runs well on **OSX** and **Ubuntu** (both as the local and remote hosts).
+I expect that it should work on a lot of other Linuxes; other BSDs will probably require at least
+some small `plumbum` patches. I'd love to help if anyone wanted to get it running on Windows.
+
 Gut is like Git, but with more U and less I
 ===========================================
 

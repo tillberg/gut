@@ -67,7 +67,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 user=remote_user,
                 keyfile=keyfile)
         else:
-            # Import paramiko late so that one could use `--openssl` without even installing paramiko
+            # Import paramiko late so that one could use `--use-openssl` without even installing paramiko
             import paramiko
             from plumbum.machines.paramiko_machine import ParamikoMachine
             # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
@@ -207,7 +207,7 @@ def main():
         else:
             parser.add_argument('local')
             parser.add_argument('remote')
-            parser.add_argument('--openssl', action='store_true')
+            parser.add_argument('--use-openssl', action='store_true')
             parser.add_argument('--identity', '-i')
             # parser.add_argument('--verbose', '-v', action='count')
             args = parse_args()
@@ -216,7 +216,7 @@ def main():
                 parser.error('remote must include both the hostname and path, separated by a colon')
             remote_addr, remote_path = args.remote.split(':', 1)
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-            sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl, keyfile=args.identity)
+            sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.use_openssl, keyfile=args.identity)
 
 if __name__ == '__main__':
     main()
