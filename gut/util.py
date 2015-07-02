@@ -28,7 +28,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             watcher = None
             if context['which']['inotifywait'](retcode=None).strip():
                 inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
-                watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '.gut/']
+                watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '\.gut/']
                 for event in inotify_events:
                     watcher = watcher['--event', event]
                 watcher = watcher['./']
