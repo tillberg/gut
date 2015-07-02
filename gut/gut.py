@@ -12,6 +12,7 @@ import threading
 
 import plumbum
 from plumbum.commands.processes import ProcessExecutionError
+import patch_plumbum; patch_plumbum.patch_darwin_stat()
 
 GIT_REPO_URL = 'https://github.com/git/git.git'
 GIT_VERSION = 'v2.4.5'
