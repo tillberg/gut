@@ -133,7 +133,7 @@ def missing_dependency(context, name, retry_failed=None):
             output = context['sudo'][context['apt-get']['install', '-y', name]]()
         else:
             out(dim('$ brew install ') + name + '\n')
-            output = context['brew']['install', name]()
+            output = context['brew']['install', name].with_env(HOMEBREW_NO_EMOJI=1)()
         quote(context, output)
     else:
         out(color_error('\nYou seem to be missing a required dependency, ') + name + color_error(', on ') + context._name + color_error('.'))
@@ -381,7 +381,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
                 watcher = context['fswatch']['./']
                 watch_type = 'fswatch'
             else:
-                raise Exception('missing ' + ('fswatch' if context.is_osx else 'inotifywait'))
+                raise Exception('missing ' + ('fswatch' if context._is_osx else 'inotifywait'))
             out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._sync_path + '\n')
             kill_via_pidfile(context, watch_type)
             proc = watcher.popen()
@@ -428,14 +428,20 @@ def pidfile_path(context, process_name):
     return context.path(os.path.join(GUT_PATH, '%s.pid' % (process_name,)))
 
 def kill_via_pidfile(context, process_name):
-    quote(context, context['pkill']['--pidfile', '%s' % (pidfile_path(context, process_name),), process_name](retcode=None))
+    # As usual, Darwin doesn't have the --pidfile flag, but it does have -F, because we like obscurity
+    path = pidfile_path(context, process_name)
+    if path.exists():
+        _, out, err = context['pkill']['-F', path, process_name].run(retcode=None)
+        quote(context, out)
+        quote(context, err)
 
 def save_pidfile(context, process_name, pid):
     my_path = pidfile_path(context, process_name)
     if not pid:
-        pid = context['pgrep']['--newest', process_name]().strip()
+        # --newest is not supported in Darwin; -n work in both Darwin and Linux, though
+        pid = context['pgrep']['-n', process_name]().strip()
         if pid:
-            out(dim('Using PID of ') + pid + dim(' (from `pgrep --newest ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name + dim('.\n'))
+            out(dim('Using PID of ') + pid + dim(' (from `pgrep -n ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name + dim('.\n'))
     if pid:
         active_pidfiles.append((context, process_name))
         my_path.write('%s' % (pid,))
@@ -447,10 +453,10 @@ def start_ssh_tunnel(local, remote):
         missing_dependency(local, 'autossh')
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
     kill_via_pidfile(local, 'autossh')
-    local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
     autossh = local['autossh']
     if local._is_osx:
         autossh = autossh['-M', AUTOSSH_MONITOR_PORT]
+    autossh = autossh.with_env(AUTOSSH_PIDFILE=unicode(pidfile_path(local, 'autossh')))
     autossh = autossh['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
     proc = autossh.popen()
     active_pidfiles.append((local, 'autossh')) # autossh writes its own pidfile
@@ -514,11 +520,13 @@ def setup_gut_origin(context, path):
 
 def init_context(context, sync_path=None, host='localhost', user=None):
     context._name = color_host(host)
-    uname = context['uname']()
-    context._is_osx = uname == 'Darwin'
-    context._is_linux = uname == 'Linux'
+    context._is_osx = context.uname == 'Darwin'
+    context._is_linux = context.uname == 'Linux'
     context._ssh_address = (('%s@' % (user,) if user else '') + host) if host else ''
     context._sync_path = color_host_path(context, sync_path)
+    if context._is_osx:
+        # Because .profile vs .bash_profile vs .bashrc is probably not right, and this is where homebrew installs stuff, by default
+        context.env['PATH'] = context.env['PATH'] + ':/usr/local/bin'
 
 def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False, keyfile=None):
     try:
