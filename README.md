@@ -14,10 +14,13 @@ Gut solves this problem by using a modified version of git to synchronize change
 between multiple systems (it currently syncs only two at a time, but it could be
 patched to support N remotes) in real-time.
 
-Getting Started
-===============
+Installation
+============
 
-First, install `gut` via pip.
+You'll need `pip` installed first in order to install `gut`. To get `pip`, check out
+https://pip.pypa.io/en/latest/installing.html.
+
+First, install `gut` via `pip`.
 
 ```sh
 $ pip install gut
@@ -41,10 +44,16 @@ Configuring Makefile for gut... done.
 Building gut using up to 4 processes... installing to /home/ubuntu/.gut/gut-build... done.
 ```
 
-(TODO: installing dependencies)
-
 This clones git, rewrites it to gut, then builds it locally. `gut` will be rebuilt
 the first time that you sync to each remote host, as well.
+
+Whenever `gut` is missing any dependencies, it should spit out a message telling you what you need
+to install. If you tack `--install-deps` onto commands, gut will try to install dependencies for you.
+However, if any of this doesn't work for you (I only have so many system to test on), file an issue
+and I'll help you figure out what's broke and how to fix it for everyone else in the future, too.
+
+Getting Started
+===============
 
 Here's how `gut-sync` works.
 
@@ -77,6 +86,8 @@ $ git log --stat
 $ gut log --stat
 # ... <- You should see *all* the file changes recorded here, including inside ~/work2/gut/.git/
 ```
+
+To exclude files from gut-sync, use `.gutignore` just as you'd use `.gitignore` over in git-world.
 
 Gut is like Git, but with more U and less I
 ===========================================
