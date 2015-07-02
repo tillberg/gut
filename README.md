@@ -49,16 +49,34 @@ the first time that you sync to each remote host, as well.
 Here's how `gut-sync` works.
 
 ```sh
-$ gut sync ~/work my.server.com:~/work
+$ gut sync ~/work my.server.com:~/work2
 ```
 
-This command sets up a gut repo locally in ~/work and clones it to your ~/work
+This command sets up a gut repo locally in ~/work and clones it to your ~/work2
 directory on my.server.com, then starts watching the filesystem on both ends for
 changes. When a change is made, gut-sync commits the change and then merges it
 to the other server.
 
-...
+Open up a second terminal and make gut do some work:
 
+```sh
+$ cd ~/work
+$ git clone https://github.com/tillberg/gut.git
+$ cd gut
+$ rm -r gut/
+$ git add --all .
+$ git commit -m "Fixed"
+```
+
+Then hop onto the other host and take a look at what's there.
+
+```sh
+$ cd ~/work2/gut
+$ git log --stat
+# ... <- You should see the commit you just made
+$ gut log --stat
+# ... <- You should see *all* the file changes recorded here, including inside ~/work2/gut/.git/
+```
 
 Gut is like Git, but with more U and less I
 ===========================================
