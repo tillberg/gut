@@ -13,26 +13,23 @@ def rev_parse_head(context):
 
 def init(context, _sync_path):
     sync_path = context.path(_sync_path)
-    did_anything = False
-    if not sync_path.exists():
-        context['mkdir']['-p', sync_path]()
-        did_anything = True
+    context['mkdir']['-p', sync_path]()
     with context.cwd(sync_path):
         if not (sync_path / '.gut').exists():
-            out(gut(context)['init']())
-            did_anything = True
+            quote(context, gut(context)['init']())
+
+def ensure_initial_commit(context, _sync_path):
+    with context.cwd(sync_path):
         head = rev_parse_head(context)
         if head == 'HEAD':
             (sync_path / '.gutignore').write(config.DEFAULT_GUTIGNORE)
-            out(gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
-            did_anything = True
-    if not did_anything:
-        print('Already initialized gut in %s' % (sync_path,))
+            quote(context, gut(context)['add']['.gutignore']())
+            quote(context, gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
 
 def commit(context, path):
     with context.cwd(context.path(path)):
         head_before = rev_parse_head(context)
-        out(dim('Checking ') + context._name + dim(' for changes...'))
+        out(dim('Checking ') + context._name_ansi + dim(' for changes...'))
         gut(context)['add', '--all', './']()
         commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
         head_after = rev_parse_head(context)
@@ -44,7 +41,7 @@ def commit(context, path):
 
 def pull(context, path):
     with context.cwd(context.path(path)):
-        out(dim('Pulling changes to ') + context._name + dim('...'))
+        out(dim('Pulling changes to ') + context._name_ansi + dim('...'))
         gut(context)['fetch', 'origin']()
         # If the merge fails due to uncommitted changes, then we should pick them up in the next commit, which should happen very shortly thereafter
         merge_out = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'](retcode=None)
@@ -56,8 +53,8 @@ def setup_origin(context, path):
         gut(context)['remote', 'rm', 'origin'](retcode=None)
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (config.GUTD_CONNECT_PORT,)]()
         gut(context)['config', 'color.ui', 'always']()
-        gut(context)['config', 'user.name', 'gut-sync']()
-        gut(context)['config', 'user.email', 'gut-sync@nowhere.com']()
+        gut(context)['config', 'user.name', 'gut-sync ' + context._name]()
+        gut(context)['config', 'user.email', 'gut-sync-' + context._name + '@nowhere.com']()
 
 def run_daemon(context, path):
     """
@@ -72,4 +69,3 @@ def run_daemon(context, path):
     active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
     pipe_quote(proc.stdout, '%s_daemon_out' % (context._name,))
     pipe_quote(proc.stderr, '%s_daemon_err' % (context._name,))
-

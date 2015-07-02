@@ -19,6 +19,7 @@ DEFAULT_GUTIGNORE = '''
 # Added by `gut sync` during repo init:
 *.lock
 .#*
+*.pyc
 '''.lstrip()
 
 ALL_GUT_COMMANDS = (

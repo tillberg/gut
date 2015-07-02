@@ -28,12 +28,12 @@ def save_process_pid(context, process_name, pid):
         # --newest is not supported in Darwin; -n work in both Darwin and Linux, though
         pid = context['pgrep']['-n', process_name]().strip()
         if pid:
-            out(dim('Using PID of ') + pid + dim(' (from `pgrep -n ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name + dim('.\n'))
+            out(dim('Using PID of ') + pid + dim(' (from `pgrep -n ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name_ansi + dim('.\n'))
     if pid:
         active_pidfiles.append((context, process_name))
         my_path.write('%s' % (pid,))
     else:
-        out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name + '\n')
+        out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name_ansi + '\n')
 
 def shutting_down():
     with _shutting_down_lock:
@@ -44,11 +44,9 @@ def shutdown(exit=True):
         global _shutting_down
         _shutting_down = True
     try:
-        if active_pidfiles:
-            out('\n')
         # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
-            out_dim('Shutting down %s on %s...' % (process_name, context._name))
+            out_dim('\nShutting down %s on %s...' % (process_name, context._name_ansi))
             retries = 3
             while True:
                 try:
@@ -56,13 +54,14 @@ def shutdown(exit=True):
                 except Exception as ex:
                     retries -= 1
                     if retries <= 0:
-                        out(color_error(' failed: "%s".\n' % (ex,)))
+                        out(color_error(' failed: "%s".' % (ex,)))
                         break
                     import time
                     time.sleep(1)
                 else:
-                    out_dim(' done.\n')
+                    out_dim(' done.')
                     break
+        out('\n')
     except KeyboardInterrupt:
         pass
     if exit:
@@ -99,7 +98,7 @@ def bright(text):
     return ANSI_BRIGHT + unicode(text) + ANSI_RESET_ALL
 
 def color_host_path(context, path):
-    return (context._name + dim(':') if not context._is_local else '') + color_path(context.path(path))
+    return (context._name_ansi + dim(':') if not context._is_local else '') + color_path(context.path(path))
 
 def out(text):
     sys.stderr.write(text)
@@ -112,7 +111,7 @@ def quote(context, text):
     for line in text.strip().split('\n'):
         # Avoid outputting lines that only contain control characters and whitespace
         if RE_ANSI.sub('', line).strip():
-            out(dim('[') + context._name + dim('] ') + line + '\n')
+            out(dim('[') + context._name_ansi + dim('] ') + line + '\n')
 
 def pipe_quote(stream, name):
     def run():

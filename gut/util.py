@@ -74,10 +74,9 @@ def start_ssh_tunnel(local, remote):
     autossh = local['autossh']
     if local._is_osx:
         autossh = autossh['-M', config.AUTOSSH_MONITOR_PORT]
-    autossh = autossh.with_env(AUTOSSH_PIDFILE=unicode(get_pidfile_path(local, 'autossh')))
     autossh = autossh['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
     proc = autossh.popen()
-    active_pidfiles.append((local, 'autossh')) # autossh writes its own pidfile
+    save_process_pid(local, 'autossh', proc.pid)
     # If we got something on autossh_err like: "channel_setup_fwd_listener_tcpip: cannot listen to port: 34925", we could try `fuser -k -n tcp 34925`
     pipe_quote(proc.stdout, 'autossh_out')
     pipe_quote(proc.stderr, 'autossh_err')

@@ -18,7 +18,7 @@ import util
 
 def ensure_build(context):
     if not context.path(config.GUT_EXE_PATH).exists() or config.GIT_VERSION.lstrip('v') not in gut.get_version(context):
-        out(dim('Need to build gut on ') + context._name + dim('.\n'))
+        out(dim('Need to build gut on ') + context._name_ansi + dim('.\n'))
         gut_build.ensure_gut_folders(context)
         gut_build.gut_prepare(plumbum.local) # <-- we always prepare gut source locally
         if context != plumbum.local:
@@ -27,23 +27,6 @@ def ensure_build(context):
         gut_build.gut_build(context)
         return True
     return False
-
-def rsync_gut(src_context, src_path, dest_context, dest_path):
-    # rsync just the .gut folder, then reset --hard the destination to the HEAD of the source
-    # XXX This really ought to be done via starting up gut-daemon on the other host and then doing a gut-clone instead of relying on rsync.
-    util.rsync(src_context, os.path.join(src_path, '.gut'), dest_context, os.path.join(dest_path, '.gut'))
-    with src_context.cwd(src_context.path(src_path)):
-        src_head = gut.rev_parse_head(src_context)
-    with dest_context.cwd(dest_context.path(dest_path)):
-        out(dim('Hard-resetting freshly-synced gut repo in ') + dest_context._sync_path + dim(' to ') + color_commit(src_head) + dim('...'))
-        output = gut.gut(dest_context)['reset', '--hard', src_head]()
-        out_dim('done.\n')
-        quote(dest_context, output)
-
-def run_gut_daemons(local, local_path, remote, remote_path):
-    gut.run_daemon(local, local_path)
-    gut.run_daemon(remote, remote_path)
-    util.start_ssh_tunnel(local, remote)
 
 def get_tail_hash(context, sync_path):
     """
@@ -60,12 +43,13 @@ def assert_folder_empty(context, _path):
     path = context.path(_path)
     if path.exists() and ((not path.isdir()) or len(path.list()) > 0):
         # If it exists, and it's not a directory or not an empty directory, then bail
-        out(color_error('Refusing to auto-initialize ') + color_path(path) + color_error(' on ') + context._name)
+        out(color_error('Refusing to initialize ') + color_path(path) + color_error(' on ') + context._name_ansi)
         out(color_error(' as it is not an empty directory. Move or delete it manually first.\n'))
         shutdown()
 
 def init_context(context, sync_path=None, host=None, user=None):
-    context._name = color_host(host or 'localhost')
+    context._name = host or 'localhost'
+    context._name_ansi = color_host(context._name)
     context._is_local = not host
     context._is_osx = context.uname == 'Darwin'
     context._is_linux = context.uname == 'Linux'
@@ -103,34 +87,47 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         local_tail_hash = get_tail_hash(local, local_path)
         remote_tail_hash = get_tail_hash(remote, remote_path)
 
+        util.start_ssh_tunnel(local, remote)
+
+        def cross_init(src_context, src_path, dest_context, dest_path):
+            gut.run_daemon(src_context, src_path)
+            gut.init(dest_context, dest_path)
+            gut.setup_origin(dest_context, dest_path)
+            import time
+            time.sleep(2) # Give the gut-daemon and SSH tunnel a moment to start up
+            gut.pull(dest_context, dest_path)
+            gut.run_daemon(dest_context, dest_path)
+
         # Do we need to initialize local and/or remote gut repos?
         if not local_tail_hash or local_tail_hash != remote_tail_hash:
             out(dim('Local gut repo base commit: [') + color_commit(local_tail_hash) + dim(']\n'))
             out(dim('Remote gut repo base commit: [') + color_commit(remote_tail_hash) + dim(']\n'))
             if local_tail_hash and not remote_tail_hash:
                 assert_folder_empty(remote, remote_path)
-                out('Initializing remote repo from local repo...\n')
-                rsync_gut(local, local_path, remote, remote_path)
+                out_dim('Initializing remote repo from local repo...\n')
+                cross_init(local, local_path, remote, remote_path)
             elif remote_tail_hash and not local_tail_hash:
                 assert_folder_empty(local, local_path)
-                out('Initializing local folder from remote gut repo...\n')
-                rsync_gut(remote, remote_path, local, local_path)
+                out_dim('Initializing local folder from remote gut repo...\n')
+                cross_init(remote, remote_path, local, local_path)
             elif not local_tail_hash and not remote_tail_hash:
                 assert_folder_empty(remote, remote_path)
                 assert_folder_empty(local, local_path)
-                out('Initializing both local and remote gut repos...\n')
+                out_dim('Initializing both local and remote gut repos...\n')
                 out_dim('Initializing local repo first...\n')
                 gut.init(local, local_path)
+                gut.ensure_initial_commit(local, local_path)
                 out_dim('Initializing remote repo from local repo...\n')
-                rsync_gut(local, local_path, remote, remote_path)
+                cross_init(local, local_path, remote, remote_path)
             else:
                 out(color_error('Cannot sync incompatible gut repos:\n'))
                 out(color_error('Local initial commit hash: [') + color_commit(local_tail_hash) + color_error(']\n'))
                 out(color_error('Remote initial commit hash: [') + color_commit(remote_tail_hash) + color_error(']\n'))
                 shutdown()
-
-        run_gut_daemons(local, local_path, remote, remote_path)
-        # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
+        else:
+            gut.run_daemon(local, local_path)
+            gut.run_daemon(remote, remote_path)
+            # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
 
         gut.setup_origin(local, local_path)
         gut.setup_origin(remote, remote_path)
@@ -177,6 +174,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 # else:
                 #     out('ignoring changed %s %s\n' % (system, path))
     except KeyboardInterrupt:
+        out(dim('\nSIGINT received. Shutting down...'))
         shutdown(exit=False)
     except Exception:
         shutdown(exit=False)
