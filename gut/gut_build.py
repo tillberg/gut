@@ -42,6 +42,8 @@ def rename_git_to_gut_recursive(root_path):
             if filename == 'read-cache.c':
                 # This is a special case super-optimized string parse for the 'i' in 'git':
                 contents = contents.replace("rest[1] != 'i' && rest[1] != 'I'", "rest[1] != 'u' && rest[1] != 'U'")
+            if filename == 'utf8.c':
+                contents = contents.replace("if (c != 'i' && c != 'I'", "if (c != 'u' && c != 'U'")
             if filename == 'GUT-VERSION-GEN':
                 # GUT-VERSION-GEN attempts to use `git` to look at the git repo's history in order to determine the version string.
                 # This prevents gut-gui/GUT-VERSION-GEN from calling `gut` and causing `gut_proxy` from recursively building `gut` in an infinite loop.
