@@ -35,13 +35,14 @@ DEFAULT_GUTIGNORE = '''
 '''.lstrip()
 
 DEPENDENCY_ERROR_MAP = {
-    'autoconf: command not found': 'autoconf',
+    'autoconf: not found': 'autoconf',
+    'msgfmt: not found': 'gettext',
     'missing fswatch': 'fswatch',
     'missing inotifywait': 'inotify-tools',
 }
 
-BREW_DEPS = ['libyaml', 'autoconf', 'fswatch', 'autossh']
-APT_GET_DEPS = ['gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']
+BREW_DEPS = ['autoconf', 'fswatch', 'autossh']
+APT_GET_DEPS = ['gettext', 'autoconf', 'inotify-tools', 'autossh']
 
 _shutting_down = False
 _shutting_down_lock = threading.Lock()
@@ -129,7 +130,7 @@ def missing_dependency(context, name, retry_failed=None):
         if has_apt_get:
             # This needs to go to the foreground in case it has a password prompt
             out(dim('$ sudo apt-get install ') + name + '\n')
-            output = sudo[context['apt-get']['install', name]]()
+            output = context['sudo'][context['apt-get']['install', '-y', name]]()
         else:
             out(dim('$ brew install ') + name + '\n')
             output = context['brew']['install', name]()
@@ -236,6 +237,9 @@ def divine_missing_dependency(exception_text):
     for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
         if text in exception_text:
             return name
+        # Some systems say "command not found", others say "not found"
+        if text.replace('not found', 'command not found') in exception_text:
+            return name
     return None
 
 def retry_method(context, cb):
@@ -303,7 +307,7 @@ def rsync_gut(src_context, src_path, dest_context, dest_path):
     with src_context.cwd(src_context.path(src_path)):
         src_head = gut_rev_parse_head(src_context)
     with dest_context.cwd(dest_context.path(dest_path)):
-        out(dim('Hard-resetting freshly-synced gut repo in ') + dest_context._path + dim(' to ') + color_commit(src_head[:GUT_HASH_DISPLAY_CHARS]) + dim('...'))
+        out(dim('Hard-resetting freshly-synced gut repo in ') + dest_context._sync_path + dim(' to ') + color_commit(src_head[:GUT_HASH_DISPLAY_CHARS]) + dim('...'))
         output = gut(dest_context)['reset', '--hard', src_head]()
         out_dim('done.\n')
         quote(dest_context, output)
@@ -377,9 +381,8 @@ def watch_for_changes(context, path, event_prefix, event_queue):
                 watcher = context['fswatch']['./']
                 watch_type = 'fswatch'
             else:
-                is_osx = 'Darwin' in context['uname']()
-                raise Exception('missing ' + ('fswatch' if is_osx else 'inotifywait'))
-            out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._path + '\n')
+                raise Exception('missing ' + ('fswatch' if context.is_osx else 'inotifywait'))
+            out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._sync_path + '\n')
             kill_via_pidfile(context, watch_type)
             proc = watcher.popen()
             save_pidfile(context, watch_type, proc.pid)
@@ -446,9 +449,12 @@ def start_ssh_tunnel(local, remote):
     kill_via_pidfile(local, 'autossh')
     local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
     autossh = local['autossh']
-    autossh = autossh['-M', AUTOSSH_MONITOR_PORT, '-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
+    if local._is_osx:
+        autossh = autossh['-M', AUTOSSH_MONITOR_PORT]
+    autossh = autossh['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
     proc = autossh.popen()
     active_pidfiles.append((local, 'autossh')) # autossh writes its own pidfile
+    # If we got something on autossh_err like: "channel_setup_fwd_listener_tcpip: cannot listen to port: 34925", we could try `fuser -k -n tcp 34925`
     pipe_quote(proc.stdout, 'autossh_out')
     pipe_quote(proc.stderr, 'autossh_err')
 
@@ -506,10 +512,16 @@ def setup_gut_origin(context, path):
         gut(context)['config', 'user.name', 'gut-sync']()
         gut(context)['config', 'user.email', 'gut-sync@nowhere.com']()
 
+def init_context(context, sync_path=None, host='localhost', user=None):
+    context._name = color_host(host)
+    uname = context['uname']()
+    context._is_osx = uname == 'Darwin'
+    context._is_linux = uname == 'Linux'
+    context._ssh_address = (('%s@' % (user,) if user else '') + host) if host else ''
+    context._sync_path = color_host_path(context, sync_path)
+
 def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False, keyfile=None):
     try:
-        local._ssh_address = ''
-        remote_ssh_address = ('%s@' % (remote_user,) if remote_user else '') + remote_host
         if use_openssl:
             remote = plumbum.SshMachine(
                 remote_host,
@@ -525,12 +537,10 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 user=remote_user,
                 keyfile=keyfile,
                 missing_host_policy=paramiko.AutoAddPolicy())
-        local._path = color_host_path(local, local_path)
-        remote._ssh_address = remote_ssh_address
-        remote._name = color_host(remote_host)
-        remote._path = color_host_path(remote, remote_path)
+        init_context(local, sync_path=local_path)
+        init_context(remote, sync_path=remote_path, host=remote_host, user=remote_user)
 
-        out(dim('Syncing ') + local._path + dim(' with ') + remote._path + '\n')
+        out(dim('Syncing ') + local._sync_path + dim(' with ') + remote._sync_path + '\n')
 
         ensure_build(local)
         ensure_build(remote)
@@ -632,23 +642,27 @@ def main():
             os.execv(gut_exe_path, args)
     else:
         local = plumbum.local
-        local._name = color_host('localhost')
+        init_context(local)
+        parser = argparse.ArgumentParser()
+        parser.add_argument('action', choices=['build', 'sync'])
+        parser.add_argument('--install-deps', action='store_true')
+        def parse_args():
+            args = parser.parse_args()
+            global auto_install_deps
+            auto_install_deps = args.install_deps
+            return args
         if action == 'build':
+            args = parse_args()
             if not ensure_build(local):
                 out(dim('gut ') + GIT_VERSION + dim(' has already been built.\n'))
         else:
-            parser = argparse.ArgumentParser()
-            parser.add_argument('action', choices=['sync'])
             parser.add_argument('local')
             parser.add_argument('remote')
-            # parser.add_argument('--verbose', '-v', action='count')
             parser.add_argument('--openssl', action='store_true')
-            parser.add_argument('--install-deps', action='store_true')
             parser.add_argument('--identity', '-i')
-            args = parser.parse_args()
+            # parser.add_argument('--verbose', '-v', action='count')
+            args = parse_args()
             local_path = args.local
-            global auto_install_deps
-            auto_install_deps = args.install_deps
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
             remote_addr, remote_path = args.remote.split(':', 1)
