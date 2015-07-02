@@ -37,12 +37,13 @@ DEPENDENCY_ERROR_MAP = {
     'autoconf: command not found': 'autoconf',
 }
 
-BREW_DEPS = ['libyaml', 'fswatch', 'autossh']
+BREW_DEPS = ['libyaml', 'autoconf', 'fswatch', 'autossh']
 APT_GET_DEPS = ['gettext', 'libyaml-dev', 'libcurl4-openssl-dev', 'libexpat1-dev', 'autoconf', 'inotify-tools', 'autossh']
 
 _shutting_down = False
 _shutting_down_lock = threading.Lock()
 active_pidfiles = []
+auto_install_deps = False
 
 def shutting_down():
     with _shutting_down_lock:
@@ -83,6 +84,7 @@ def ansi(num):
 RE_ANSI = re.compile('\033\[\d*m')
 ANSI_RESET_ALL = ansi('')
 ANSI_RESET_COLOR = ansi(39)
+ANSI_BRIGHT = ansi(1)
 ANSI_DIM = ansi(2)
 ANSI_COLORS = {'grey': 30, 'red': 31, 'green': 32, 'yellow': 33, 'blue': 34, 'magenta': 35, 'cyan': 36, 'white': 37}
 
@@ -90,13 +92,16 @@ def colored(color):
     def _colored(text):
         return ansi(ANSI_COLORS[color]) + unicode(text) + ANSI_RESET_COLOR
     return _colored
-color_path = colored('blue')
+color_path = colored('cyan')
 color_host = colored('yellow')
 color_commit = colored('green')
 color_error = colored('red')
 
 def dim(text):
     return ANSI_DIM + unicode(text) + ANSI_RESET_ALL
+
+def bright(text):
+    return ANSI_BRIGHT + unicode(text) + ANSI_RESET_ALL
 
 def color_host_path(context, path):
     return (context._name + dim(':') if context != plumbum.local else '') + color_path(context.path(path))
@@ -114,21 +119,35 @@ def quote(context, text):
         if RE_ANSI.sub('', line).strip():
             out(dim('[') + context._name + dim('] ') + line + '\n')
 
-def missing_dependency(context, name):
+def missing_dependency(context, name, retry_failed=None):
     has_apt_get = context['which']['apt-get'](retcode=None) != ''
-    out(color_error('\nYou appear to be missing a required dependency, ') + name + color_error(', on ') + context._name + color_error('.'))
-    out(dim('\nTo install just this dependency, you could try running this:\n$ '))
-    if has_apt_get:
-        out('sudo apt-get install ' + name)
+    if auto_install_deps and not retry_failed:
+        out(dim('Attempting to automatically install missing dependency ') + name + dim('...\n'))
+        if has_apt_get:
+            # This needs to go to the foreground in case it has a password prompt
+            out(dim('$ sudo apt-get install ') + name + '\n')
+            output = sudo[context['apt-get']['install', name]]()
+        else:
+            out(dim('$ brew install ') + name + '\n')
+            output = context['brew']['install', name]()
+        quote(context, output)
     else:
-        out('brew install ' + name)
-    out(dim('\n\nOr to install all required dependencies, you could try running this instead:\n$ '))
-    if has_apt_get:
-        out('sudo apt-get install ' + ' '.join(APT_GET_DEPS))
-    else:
-        out('brew install ' + ' '.join(BREW_DEPS))
-    out('\n\n')
-    shutdown()
+        out(color_error('\nYou seem to be missing a required dependency, ') + name + color_error(', on ') + context._name + color_error('.'))
+        out(dim('\nTo install just this dependency, you could try running this:\n$ '))
+        if has_apt_get:
+            out('sudo apt-get install ' + name)
+        else:
+            out('brew install ' + name)
+        if not auto_install_deps:
+            out(dim('\n\nOr if you\'d prefer, I\'ll try to automatically install dependencies as needed with the ') +
+                bright('--install-deps') + dim(' flag.\n'))
+        # out(dim('\n\nOr to install all required dependencies, you could try running this instead:\n$ '))
+        # if has_apt_get:
+        #     out('sudo apt-get install ' + ' '.join(APT_GET_DEPS))
+        # else:
+        #     out('brew install ' + ' '.join(BREW_DEPS))
+        # out('\n\n')
+        shutdown()
 
 def rename_git_to_gut(s):
     return (s
@@ -210,14 +229,38 @@ def gut_prepare(context):
         rename_git_to_gut_recursive('%s' % (gut_src_path,))
         out_dim(' done.\n')
 
+def retry_method(context, cb):
+    retry = True
+    last_retry = None
+    while retry:
+        retry = False
+        try:
+            cb()
+        except ProcessExecutionError as ex:
+            import traceback
+            for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
+                if text in ex.stdout or text in ex.stderr:
+                    out(color_error(' failed (missing ') + name + color_error(')') + dim('.\n\n'))
+                    traceback.print_exc(file=sys.stderr)
+                    missing_dependency(context, name, retry_failed=(name == last_retry))
+                    out_dim('Retrying...\n')
+                    last_retry = name
+                    retry = True
+                    break
+            if retry:
+                continue
+            out(color_error(' failed') + dim('.\n\n'))
+            raise
+
+
 def gut_build(context):
     gut_src_path = context.path(GUT_SRC_PATH)
     gut_dist_path = context.path(GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (gut_dist_path,)
     with context.cwd(gut_src_path):
-        parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
-        out(dim('Configuring Makefile for gut...'))
-        try:
+        def build():
+            parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
+            out(dim('Configuring Makefile for gut...'))
             context['make'][install_prefix, 'configure']()
             context[gut_src_path / 'configure'][install_prefix]()
             out(dim(' done.\nBuilding gut using up to ') + parallelism + dim(' processes...'))
@@ -225,14 +268,7 @@ def gut_build(context):
             out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
             context['make'][install_prefix, 'install']()
             out(dim(' done.\n'))
-        except ProcessExecutionError as ex:
-            import traceback
-            out(color_error(' failed') + dim('.\n\n'))
-            traceback.print_exc(file=sys.stderr)
-            for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
-                if text in ex.stdout or text in ex.stderr:
-                    return missing_dependency(context, name)
-            raise
+        retry_method(context, build)
 
 def gut_rev_parse_head(context):
     return gut(context)['rev-parse', 'HEAD'](retcode=None).strip() or None
@@ -391,6 +427,8 @@ def save_pidfile(context, process_name, pid):
         out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name + '\n')
 
 def start_ssh_tunnel(local, remote):
+    if not local['which']['autossh'](retcode=None).strip():
+        missing_dependency(local, 'autossh')
     ssh_tunnel_opts = '%s:localhost:%s' % (GUTD_CONNECT_PORT, GUTD_BIND_PORT)
     kill_via_pidfile(local, 'autossh')
     local.env['AUTOSSH_PIDFILE'] = unicode(pidfile_path(local, 'autossh'))
@@ -453,18 +491,25 @@ def setup_gut_origin(context, path):
         gut(context)['config', 'user.name', 'gut-sync']()
         gut(context)['config', 'user.email', 'gut-sync@nowhere.com']()
 
-def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False):
+def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False, keyfile=None):
     try:
         local._ssh_address = ''
         remote_ssh_address = ('%s@' % (remote_user,) if remote_user else '') + remote_host
         if use_openssl:
-            remote = plumbum.SshMachine(remote_host, user=remote_user)
+            remote = plumbum.SshMachine(
+                remote_host,
+                user=remote_user,
+                keyfile=keyfile)
         else:
             # Import paramiko late so that one could use `--openssl` without even installing paramiko
             import paramiko
             from plumbum.machines.paramiko_machine import ParamikoMachine
             # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
-            remote = ParamikoMachine(remote_host, user=remote_user, missing_host_policy=paramiko.AutoAddPolicy())
+            remote = ParamikoMachine(
+                remote_host,
+                user=remote_user,
+                keyfile=keyfile,
+                missing_host_policy=paramiko.AutoAddPolicy())
         local._path = color_host_path(local, local_path)
         remote._ssh_address = remote_ssh_address
         remote._name = color_host(remote_host)
@@ -583,13 +628,17 @@ def main():
             parser.add_argument('remote')
             # parser.add_argument('--verbose', '-v', action='count')
             parser.add_argument('--openssl', action='store_true')
+            parser.add_argument('--install-deps', action='store_true')
+            parser.add_argument('--identity', '-i')
             args = parser.parse_args()
             local_path = args.local
+            global auto_install_deps
+            auto_install_deps = args.install_deps
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
             remote_addr, remote_path = args.remote.split(':', 1)
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-            sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl)
+            sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.openssl, keyfile=args.identity)
 
 if __name__ == '__main__':
     main()
