@@ -17,8 +17,15 @@ patched to support N remotes) in real-time.
 Installation
 ============
 
-You'll need `pip` installed first in order to install `gut`. To get `pip`, check out
-https://pip.pypa.io/en/latest/installing.html.
+You'll need `pip` and the python dev headers installed first in order to install `gut`.
+To get `pip`, check out https://pip.pypa.io/en/latest/installing.html.
+
+You might be able to just do one of these:
+
+```sh
+(Ubuntu) $ sudo apt-get install python-pip python-dev
+(OSX w/easy_install) $ sudo easy_install pip
+```
 
 First, install `gut` via `pip`.
 
