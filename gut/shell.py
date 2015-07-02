@@ -184,17 +184,14 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 
 def main():
     action = len(sys.argv) >= 2 and sys.argv[1]
-    if action and (plumbum.local.path(config.GUT_DIST_PATH) / ('libexec/gut-core/gut-%s' % (action,))).exists():
-        gut_exe_path = unicode(plumbum.local.path(config.GUT_EXE_PATH))
-        args = [gut_exe_path] + sys.argv[1:]
-        try:
-            # Try executing gut; if we get an error on invocation, then try building gut and trying again
-            os.execv(gut_exe_path, args)
-        except OSError:
+    if action in config.ALL_GUT_COMMANDS:
+        gut_exe_path = plumbum.local.path(config.GUT_EXE_PATH)
+        # Build gut if needed
+        if not plumbum.local.path(config.GUT_EXE_PATH).exists():
             local = plumbum.local
             init_context(local)
             ensure_build(local)
-            os.execv(gut_exe_path, args)
+        os.execv(unicode(gut_exe_path), [unicode(gut_exe_path)] + sys.argv[1:])
     else:
         local = plumbum.local
         init_context(local)
