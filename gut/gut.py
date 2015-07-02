@@ -116,7 +116,7 @@ def quote(context, text):
 
 def missing_dependency(context, name):
     has_apt_get = context['which']['apt-get'](retcode=None) != ''
-    out(color_error('\n\nYou appear to be missing a required dependency, ') + name + color_error(', on ') + context._name + color_error('.'))
+    out(color_error('\nYou appear to be missing a required dependency, ') + name + color_error(', on ') + context._name + color_error('.'))
     out(dim('\nTo install just this dependency, you could try running this:\n$ '))
     if has_apt_get:
         out('sudo apt-get install ' + name)
@@ -130,9 +130,16 @@ def missing_dependency(context, name):
     out('\n\n')
     shutdown()
 
+def rename_git_to_gut(s):
+    return (s
+        .replace('GIT', 'GUT')
+        .replace('Git', 'Gut')
+        .replace('git', 'gut')
+        .replace('digut', 'digit')
+        .replace('DIGUT', 'DIGIT')
+    )
+
 def rename_git_to_gut_recursive(root_path):
-    def rename_git_to_gut(s):
-        return s.replace('GIT', 'GUT').replace('Git', 'Gut').replace('git', 'gut')
     for root, dirs, files in os.walk(root_path):
         for orig_filename in files:
             if orig_filename.startswith('.git'):
@@ -219,6 +226,9 @@ def gut_build(context):
             context['make'][install_prefix, 'install']()
             out(dim(' done.\n'))
         except ProcessExecutionError as ex:
+            import traceback
+            out(color_error(' failed') + dim('.\n\n'))
+            traceback.print_exc(file=sys.stderr)
             for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
                 if text in ex.stdout or text in ex.stderr:
                     return missing_dependency(context, name)
