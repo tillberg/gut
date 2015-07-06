@@ -132,7 +132,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         gut.setup_origin(local, local_path)
         gut.setup_origin(remote, remote_path)
 
-        def commit_and_update(src_system):
+        def commit_and_update(src_system, update_untracked=False):
             if src_system == 'local':
                 src_context = local
                 src_path = local_path
@@ -145,7 +145,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 dest_context = local
                 dest_path = local_path
                 dest_system = 'local'
-            if gut.commit(src_context, src_path):
+            if gut.commit(src_context, src_path, update_untracked=update_untracked):
                 gut.pull(dest_context, dest_path)
 
         event_queue = Queue.Queue()
@@ -154,8 +154,10 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         # The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
         # commit_and_update calls below and the time that the filesystem watches are attached.
 
-        commit_and_update('remote')
-        commit_and_update('local')
+        commit_and_update('remote', update_untracked=True)
+        commit_and_update('local', update_untracked=True)
+        gut.pull(remote, remote_path)
+        gut.pull(local, local_path)
 
         changed = set()
         changed_ignore = set()
@@ -164,8 +166,9 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 event = event_queue.get(True, 0.1 if changed else 10000)
             except Queue.Empty:
                 for system in changed:
-                    commit_and_update(system)
+                    commit_and_update(system, update_untracked=(system in changed_ignore))
                 changed.clear()
+                changed_ignore.clear()
             else:
                 system, path = event
                 # Ignore events inside the .gut folder; these should also be filtered out in inotifywait/fswatch/etc if possible
@@ -174,7 +177,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                     changed.add(system)
                     if path_parts[-1] == '.gutignore':
                         changed_ignore.add(system)
-                        out('changed_ignore %s on %s\n' % (path, system))
+                        # out('changed_ignore %s on %s\n' % (path, system))
                     # else:
                     #     out('changed %s %s\n' % (system, path))
                 # else:

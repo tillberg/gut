@@ -26,10 +26,12 @@ def ensure_initial_commit(context, _sync_path):
             quote(context, gut(context)['add']['.gutignore']())
             quote(context, gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
 
-def commit(context, path):
+def commit(context, path, update_untracked=False):
     with context.cwd(context.path(path)):
         head_before = rev_parse_head(context)
         out(dim('Checking ') + context._name_ansi + dim(' for changes...'))
+        if update_untracked:
+            gut(context)['rm', '--cached', '-r', '--ignore-unmatch', '--quiet', './']()
         gut(context)['add', '--all', './']()
         commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
         head_after = rev_parse_head(context)
