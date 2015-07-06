@@ -56,7 +56,7 @@ def setup_origin(context, path):
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (config.GUTD_CONNECT_PORT,)]()
         gut(context)['config', 'color.ui', 'always']()
         hostname = context['hostname']()
-        gut(context)['config', 'user.name', 'gut-sync-' + hostname]()
+        gut(context)['config', 'user.name', hostname]()
         gut(context)['config', 'user.email', 'gut-sync@' + hostname]()
 
 def run_daemon(context, path):
