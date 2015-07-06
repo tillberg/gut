@@ -4,13 +4,13 @@ import argparse
 import os
 import Queue
 import sys
-import threading
+import time
 
 import plumbum
 import patch_plumbum; patch_plumbum.patch_darwin_stat()
 
 import config
-from terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit
+from terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit, run_daemon_thread
 import deps
 import gut
 import gut_build
@@ -60,7 +60,7 @@ def init_context(context, sync_path=None, host=None, user=None):
         context.env['PATH'] = context.env['PATH'] + ':/usr/local/bin'
 
 def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False, keyfile=None):
-    try:
+    def run():
         if use_openssl:
             remote = plumbum.SshMachine(
                 remote_host,
@@ -158,7 +158,8 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         commit_and_update('local')
 
         changed = set()
-        while True:
+        changed_ignore = set()
+        while not shutting_down():
             try:
                 event = event_queue.get(True, 0.1 if changed else 10000)
             except Queue.Empty:
@@ -168,17 +169,23 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
             else:
                 system, path = event
                 # Ignore events inside the .gut folder; these should also be filtered out in inotifywait/fswatch/etc if possible
-                if not path.startswith('.gut/'):
+                path_parts = path.split(os.sep)
+                if not '.gut' in path_parts:
                     changed.add(system)
-                #     out('changed %s %s\n' % (system, path))
+                    if path_parts[-1] == '.gutignore':
+                        changed_ignore.add(system)
+                        out('changed_ignore %s on %s\n' % (path, system))
+                    # else:
+                    #     out('changed %s %s\n' % (system, path))
                 # else:
                 #     out('ignoring changed %s %s\n' % (system, path))
-    except KeyboardInterrupt:
-        out(dim('\nSIGINT received. Shutting down...'))
-        shutdown(exit=False)
-    except Exception:
-        shutdown(exit=False)
-        raise
+    run_daemon_thread(run)
+    while not shutting_down():
+        try:
+            time.sleep(1)
+        except KeyboardInterrupt:
+            out(dim('\nSIGINT received. Shutting down...'))
+            shutdown(exit=False)
 
 def main():
     action = len(sys.argv) >= 2 and sys.argv[1]
@@ -209,11 +216,14 @@ def main():
             parser.add_argument('remote')
             parser.add_argument('--use-openssl', action='store_true')
             parser.add_argument('--identity', '-i')
+            parser.add_argument('--dev', action='store_true')
             # parser.add_argument('--verbose', '-v', action='count')
             args = parse_args()
             local_path = args.local
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
+            if args.dev:
+                util.restart_on_change(os.path.abspath(__file__))
             remote_addr, remote_path = args.remote.split(':', 1)
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
             sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.use_openssl, keyfile=args.identity)

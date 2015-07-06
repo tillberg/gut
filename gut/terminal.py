@@ -35,13 +35,26 @@ def save_process_pid(context, process_name, pid):
     else:
         out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name_ansi + '\n')
 
+def run_daemon_thread(fn):
+    def run():
+        try:
+            fn()
+        except Exception as ex:
+            if not shutting_down():
+                out('\n\n%s' % (ex,))
+                shutdown(exit=False)
+                sys.exit(1)
+    thread = threading.Thread(target=run)
+    thread.daemon = True
+    thread.start()
+
 def shutting_down():
     with _shutting_down_lock:
         return _shutting_down
 
 def shutdown(exit=True):
+    global _shutting_down
     with _shutting_down_lock:
-        global _shutting_down
         _shutting_down = True
     try:
         # out_dim('Shutting down sub-processes...\n')
@@ -127,7 +140,4 @@ def pipe_quote(stream, name):
                 raise
         if not shutting_down():
             out('%s exited.\n' % (name,))
-    thread = threading.Thread(target=run)
-    thread.daemon = True
-    thread.start()
-
+    run_daemon_thread(run)

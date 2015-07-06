@@ -1,11 +1,12 @@
 import os
-import threading
+import sys
+import time
 
 import plumbum
 
 import config
 import deps
-from terminal import out, out_dim, dim, pipe_quote, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down
+from terminal import out, out_dim, dim, pipe_quote, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
@@ -20,6 +21,12 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     rsync[src_path_str, dest_path_str]()
     out_dim(' done.\n')
 
+INOTIFY_CHANGE_EVENTS = ['modify', 'attrib', 'move', 'create', 'delete']
+def append_inotify_change_events(watcher):
+    for event in INOTIFY_CHANGE_EVENTS:
+        watcher = watcher['--event', event]
+    return watcher
+
 def watch_for_changes(context, path, event_prefix, event_queue):
     proc = None
     with context.cwd(context.path(path)):
@@ -27,10 +34,8 @@ def watch_for_changes(context, path, event_prefix, event_queue):
         def run_watcher():
             watcher = None
             if context['which']['inotifywait'](retcode=None).strip():
-                inotify_events = ['modify', 'attrib', 'move', 'create', 'delete']
                 watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '\.gut/']
-                for event in inotify_events:
-                    watcher = watcher['--event', event]
+                watcher = append_inotify_change_events(watcher)
                 watcher = watcher['./']
                 watch_type = 'inotifywait'
             elif context['which']['fswatch'](retcode=None).strip():
@@ -45,25 +50,19 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             return proc
         proc = deps.retry_method(context, run_watcher)
     def run():
-        try:
-            while not shutting_down():
-                line = proc.stdout.readline()
-                if line != '':
-                    changed_path = line.rstrip()
-                    changed_path = os.path.abspath(os.path.join(watched_root, changed_path))
-                    rel_path = os.path.relpath(changed_path, watched_root)
-                    # out('changed_path: ' + changed_path + '\n')
-                    # out('watched_root: ' + watched_root + '\n')
-                    # out('changed ' + changed_path + ' -> ' + rel_path + '\n')
-                    event_queue.put((event_prefix, rel_path))
-                else:
-                    break
-        except Exception:
-            if not shutting_down():
-                raise
-    thread = threading.Thread(target=run)
-    thread.daemon = True
-    thread.start()
+        while not shutting_down():
+            line = proc.stdout.readline()
+            if line != '':
+                changed_path = line.rstrip()
+                changed_path = os.path.abspath(os.path.join(watched_root, changed_path))
+                rel_path = os.path.relpath(changed_path, watched_root)
+                # out('changed_path: ' + changed_path + '\n')
+                # out('watched_root: ' + watched_root + '\n')
+                # out('changed ' + changed_path + ' -> ' + rel_path + '\n')
+                event_queue.put((event_prefix, rel_path))
+            else:
+                break
+    run_daemon_thread(run)
     pipe_quote(proc.stderr, 'watch_%s_err' % (event_prefix,))
 
 def start_ssh_tunnel(local, remote):
@@ -80,3 +79,17 @@ def start_ssh_tunnel(local, remote):
     # If we got something on autossh_err like: "channel_setup_fwd_listener_tcpip: cannot listen to port: 34925", we could try `fuser -k -n tcp 34925`
     pipe_quote(proc.stdout, 'autossh_out')
     pipe_quote(proc.stderr, 'autossh_err')
+
+def restart_on_change(exe_path):
+    def run():
+        local = plumbum.local
+        watch_path = os.path.dirname(os.path.abspath(__file__))
+        changed = append_inotify_change_events(local['inotifywait'])[local.path(watch_path)]() # blocks until there's a change
+        out_dim('\n(dev-mode) Restarting due to [%s]...\n' % (changed.strip(),))
+        while True:
+            try:
+                os.execv(unicode(exe_path), sys.argv)
+            except Exception as ex:
+                out('error restarting: %s\n' % (ex,))
+                time.sleep(1)
+    run_daemon_thread(run)
