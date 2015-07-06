@@ -39,33 +39,17 @@ Depending on your system you may need to prepend "sudo":
 $ sudo pip install gut
 ```
 
-Next, to build **gut**:
-
-```sh
-$ gut build
-Need to build gut on localhost.
-Cloning https://github.com/git/git.git into /home/ubuntu/.gut/gut-src... done.
-Checking out fresh copy of git v2.4.5... done.
-Rewriting git to gut... done.
-Configuring Makefile for gut... done.
-Building gut using up to 4 processes... installing to /home/ubuntu/.gut/gut-build... done.
-```
-
-This clones git, rewrites it to gut, then builds it locally. **gut** will be rebuilt
-the first time that you sync to each remote host, as well.
-
-Whenever **gut** is missing any dependencies, it should spit out a message telling you what you need
-to install. If you tack `--install-deps` onto commands, gut will try to install dependencies for you.
-However, if any of this doesn't work for you (I only have so many system to test on), file an issue
-and I'll help you figure out what's broke and how to fix it for everyone else in the future, too.
-
 Getting Started
 ===============
 
-Here's how **gut-sync** works.
+You want to create a pair of linked folders, **~/work** locally and **~/work2** on
+**my.server.com**. Fire up a terminal and run something like this:
+
+(Note: The first time you run this on each machine, **gut** will build its dependencies and
+prompt you about anything extra that you need to install.)
 
 ```sh
-$ gut sync ~/work my.server.com:~/work2
+$ gut sync ~/work my.server.com:~/work
 ```
 
 This command sets up a gut repo locally in ~/work and clones it to your ~/work2
