@@ -6,7 +6,7 @@ import plumbum
 
 import config
 import deps
-from terminal import out, out_dim, dim, pipe_quote, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread
+from terminal import out, out_dim, dim, pipe_quote, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread, get_cmd
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
@@ -52,17 +52,16 @@ def append_inotify_change_events(watcher):
 def watch_for_changes(context, path, event_prefix, event_queue):
     proc = None
     with context.cwd(context.path(path)):
-        watched_root = context['pwd']().strip()
+        watched_root = (context['cmd']['/c', 'cd ,']() if context._is_windows else context['pwd']()).strip()
         def run_watcher():
+            watch_type = get_cmd(context, ['inotifywait', 'fswatch'])
             watcher = None
-            if context['which']['inotifywait'](retcode=None).strip():
+            if watch_type == 'inotifywait':
                 watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '\.gut/']
                 watcher = append_inotify_change_events(watcher)
                 watcher = watcher['./']
-                watch_type = 'inotifywait'
-            elif context['which']['fswatch'](retcode=None).strip():
+            elif watch_type == 'fswatch':
                 watcher = context['fswatch']['./']
-                watch_type = 'fswatch'
             else:
                 raise Exception('missing ' + ('fswatch' if context._is_osx else 'inotifywait'))
             out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._sync_path + '\n')
@@ -88,19 +87,20 @@ def watch_for_changes(context, path, event_prefix, event_queue):
     pipe_quote(proc.stderr, 'watch_%s_err' % (event_prefix,))
 
 def start_ssh_tunnel(local, remote):
-    if not local['which']['autossh'](retcode=None).strip():
-        deps.missing_dependency(local, 'autossh')
+    cmd = get_cmd(local, ['autossh', 'ssh'])
+    if not cmd:
+        deps.missing_dependency(local, 'ssh')
     ssh_tunnel_opts = '%s:localhost:%s' % (config.GUTD_CONNECT_PORT, config.GUTD_BIND_PORT)
-    kill_previous_process(local, 'autossh')
-    autossh = local['autossh']
-    if local._is_osx:
-        autossh = autossh['-M', config.AUTOSSH_MONITOR_PORT]
-    autossh = autossh['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
-    proc = autossh.popen()
-    save_process_pid(local, 'autossh', proc.pid)
+    kill_previous_process(local, cmd)
+    command = local[cmd]
+    if cmd == 'autossh' and local._is_osx:
+        command = command['-M', config.AUTOSSH_MONITOR_PORT]
+    command = command['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
+    proc = command.popen()
+    save_process_pid(local, cmd, proc.pid)
     # If we got something on autossh_err like: "channel_setup_fwd_listener_tcpip: cannot listen to port: 34925", we could try `fuser -k -n tcp 34925`
-    pipe_quote(proc.stdout, 'autossh_out')
-    pipe_quote(proc.stderr, 'autossh_err')
+    pipe_quote(proc.stdout, cmd + '_out')
+    pipe_quote(proc.stderr, cmd + '_err')
 
 def restart_on_change(exe_path):
     def run():
@@ -119,7 +119,7 @@ def restart_on_change(exe_path):
 def mkdirp(context, path):
     if context._is_windows:
         if context._is_local:
-            _path = os.path.normpath(os.path.expanduser(path))
+            _path = os.path.normpath(os.path.expanduser(unicode(path)))
             if not os.path.exists(_path):
                 os.makedirs(_path)
         else:

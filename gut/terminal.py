@@ -4,6 +4,7 @@ except ImportError:
     pass
 else:
     colorama.init()
+import plumbum
 
 import config
 import os
@@ -18,6 +19,16 @@ _shutting_down_lock = threading.Lock()
 
 active_pidfiles = []
 
+def get_cmd(context, cmds):
+    for cmd in cmds:
+        try:
+            context.which(cmd)
+        except plumbum.commands.CommandNotFound:
+            pass
+        else:
+            return cmd
+    return None
+
 def get_pidfile_path(context, process_name):
     return context.path(os.path.join(config.GUT_PATH, '%s.pid' % (process_name,)))
 
@@ -25,7 +36,20 @@ def kill_previous_process(context, process_name):
     # As usual, Darwin doesn't have the --pidfile flag, but it does have -F, because we like obscurity
     path = get_pidfile_path(context, process_name)
     if path.exists():
-        _, stdout, stderr = context['pkill']['-F', path, process_name].run(retcode=None)
+        cmd = get_cmd(context, ['pkill'] + (['kill'] if context._is_windows else []))
+        if not cmd:
+            deps.missing_dependency(context, 'pkill')
+        if cmd == 'pkill':
+            command = context['pkill']['-F', path, process_name]
+        else:
+            pid = context.path(path).read().strip()
+            # XXX would be good to filter on user, too?
+            tasklist_out = context['tasklist']['/fi', 'PID eq ' + pid, '/fi', 'IMAGENAME eq ' + process_name + '.exe']()
+            if not (process_name in tasklist_out and pid in tasklist_out and 'No tasks' not in tasklist_out):
+                # This process is either not running or is something else now
+                return
+            command = context['kill']['-f', pid]
+        _, stdout, stderr = command.run(retcode=None)
         quote(context, stdout)
         quote(context, stderr)
 
