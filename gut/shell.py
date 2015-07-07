@@ -21,11 +21,16 @@ def ensure_build(context):
     if not context.path(config.GUT_EXE_PATH).exists() or config.GIT_VERSION.lstrip('v') not in gut.get_version(context):
         out(dim('Need to build gut on ') + context._name_ansi + dim('.\n'))
         gut_build.ensure_gut_folders(context)
-        gut_build.gut_prepare(context)
+        gut_build.prepare(context)
         if context != plumbum.local:
             # If we're building remotely, rsync the prepared source to the remote host
             util.rsync(plumbum.local, config.GUT_SRC_PATH, context, config.GUT_SRC_PATH, excludes=['.git', 't'])
-        gut_build.gut_build(context)
+        gut_build.build(context)
+        out_dim('Cleaning up...')
+        gut_build.unprepare(context)
+        if context != plumbum.local:
+            gut_build.unprepare(plumbum.local)
+        out_dim(' done.\n')
         return True
     return False
 

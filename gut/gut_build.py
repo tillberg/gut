@@ -73,6 +73,14 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             dirs.append(folder)
 
+def git_hard_reset_and_clean(context, repo_url, repo_path, version):
+    with context.cwd(context.path(repo_path)):
+        # Do a little sanity-check to make sure we're not running these (destructive) operations in some other repo:
+        if not repo_url in context['git']['remote', '-v']():
+            raise Exception('I think I might be trying to git-reset the wrong repo.')
+        context['git']['reset', '--hard', version]()
+        context['git']['clean', '-fdx']()
+
 def git_clone_update(repo_url, src_path, version, rewrite_gut=True):
     local = plumbum.local
     ensure_gut_folders(local)
@@ -90,25 +98,32 @@ def git_clone_update(repo_url, src_path, version, rewrite_gut=True):
             out(dim('Updating git in order to upgrade to ') + version + dim('...'))
             local['git']['fetch']()
             out_dim(' done.\n')
-        out(dim('Checking out fresh copy of git ') + version + dim('...'))
-        local['git']['reset', '--hard', version]()
-        local['git']['clean', '-fd']()
+    out(dim('Checking out fresh copy of git ') + version + dim('...'))
+    git_hard_reset_and_clean(local, repo_url, gut_src_path, version)
+    with local.cwd(gut_src_path):
         if rewrite_gut:
             out_dim(' done.\nRewriting git to gut...')
             rename_git_to_gut_recursive('%s' % (gut_src_path,))
-        out_dim(' done.\n')
+    out_dim(' done.\n')
 
-def gut_prepare(build_context):
+def prepare(build_context):
     if build_context._is_windows:
         git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION, rewrite_gut=False)
         git_clone_update(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
     else:
         git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
+def unprepare(build_context):
+    if build_context._is_windows:
+        git_hard_reset_and_clean(build_context, config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
+        git_hard_reset_and_clean(build_context, config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
+    else:
+        git_hard_reset_and_clean(build_context, config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
+
 def windows_path_to_mingw_path(path):
     return u'/' + unicode(path).replace(':', '').replace('\\', '/')
 
-def gut_build(context):
+def build(context):
     gut_src_path = context.path(config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH)
     gut_dist_path = context.path(config.GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (windows_path_to_mingw_path(gut_dist_path) if context._is_windows else gut_dist_path,)
