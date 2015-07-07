@@ -96,7 +96,7 @@ def restart_on_change(exe_path):
 
 def mkdirp(context, path):
     if context._is_windows:
-        if context == plumbum.local:
+        if context._is_local:
             _path = os.path.normpath(os.path.expanduser(path))
             if not os.path.exists(_path):
                 os.makedirs(_path)
@@ -104,3 +104,9 @@ def mkdirp(context, path):
             raise Exception('Remote Windows not supported')
     else:
         context['mkdir']['-p', path]()
+
+def get_num_cores(context):
+    if context._is_windows:
+        return context['wmic']['CPU', 'Get', '/Format:List']().strip().split('=')[-1]
+    else:
+        return context['getconf']['_NPROCESSORS_ONLN']().strip()

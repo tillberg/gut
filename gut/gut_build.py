@@ -111,10 +111,10 @@ def gut_build(context):
     install_prefix = 'prefix=%s' % (gut_dist_path,)
     with context.cwd(gut_src_path):
         def build():
-            parallelism = context['getconf']['_NPROCESSORS_ONLN']().strip()
             out(dim('Configuring Makefile for gut...'))
             context['make'][install_prefix, 'configure']()
             context[gut_src_path / 'configure'][install_prefix]()
+            parallelism = util.get_num_cores(context)
             out(dim(' done.\nBuilding gut using up to ') + parallelism + dim(' processes...'))
             context['make'][install_prefix, '-j', parallelism]()
             out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
