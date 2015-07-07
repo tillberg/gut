@@ -8,11 +8,12 @@ MSYSGIT_REPO_URL = 'https://github.com/msysgit/msysgit.git'
 MSYSGIT_VERSION = 'Git-1.9.5-preview20150319'
 
 GUT_PATH = '~/.guts'
-GUT_SRC_PATH = os.path.join(GUT_PATH, 'gut-src')
-GUT_WIN_SRC_PATH = os.path.join(GUT_PATH, 'gut-win-src')
-MSYSGIT_PATH = os.path.join(GUT_PATH, 'msysgit')
-GUT_DIST_PATH = os.path.join(GUT_PATH, 'gut-build')
-GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
+GUT_SRC_PATH = '/'.join([GUT_PATH, 'gut-src'])
+GUT_SRC_TMP_PATH = '/'.join([GUT_PATH, 'gut-src-tmp'])
+GUT_WIN_SRC_PATH = '/'.join([GUT_PATH, 'gut-win-src'])
+MSYSGIT_PATH = '/'.join([GUT_PATH, 'msysgit'])
+GUT_DIST_PATH = '/'.join([GUT_PATH, 'gut-build'])
+GUT_EXE_PATH = '/'.join([GUT_DIST_PATH, 'bin/gut'])
 
 GUTD_BIND_PORT = 34924
 GUTD_CONNECT_PORT = 34925

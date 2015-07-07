@@ -13,12 +13,34 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
         return '%s%s%s/' % (context._ssh_address, ':' if context._ssh_address else '', context.path(path),)
     src_path_str = get_path_str(src_context, src_path)
     dest_path_str = get_path_str(dest_context, dest_path)
-    out(dim('rsyncing ') + color_host_path(src_context, src_path) + dim(' to ') + color_host_path(dest_context, dest_path) + dim('...'))
-    dest_context['mkdir']['-p', dest_context.path(dest_path)]()
-    rsync = plumbum.local['rsync']['-a']
-    for exclude in excludes:
-        rsync = rsync['--exclude=%s' % (exclude,)]
-    rsync[src_path_str, dest_path_str]()
+    out(dim('Uploading ') + color_host_path(src_context, src_path) + dim(' to ') + color_host_path(dest_context, dest_path) + dim('...'))
+    mkdirp(dest_context, dest_path)
+    if src_context._is_windows:
+        root_path = os.path.normpath(os.path.expanduser(unicode(src_path)))
+        for root, folders, files in os.walk(root_path):
+            dest_folder = dest_context.path(dest_path) / os.path.relpath(root, root_path).replace('\\', '/')
+            mkdirp(dest_context, dest_folder)
+            for filename in files:
+                if filename not in excludes:
+                    abs_path = os.path.join(root, filename)
+                    rel_path = os.path.relpath(abs_path, root_path)
+                    remote_path = dest_context.path(dest_path) / rel_path.replace('\\', '/')
+                    # out('Uploading ' + rel_path + ' to ' +  unicode(remote_path) + '...')
+                    dest_context.upload(src_context.path(abs_path), remote_path)
+                    if '.' not in filename  or filename.endswith('.sh'):
+                        # out(' CHMOD +x %s' % (remote_path,))
+                        dest_context['chmod']['+x', remote_path]()
+                    # out(' done.\n')
+            orig_folders = tuple(folders)
+            del folders[:]
+            for folder in orig_folders:
+                if folder not in excludes:
+                    folders.append(folder)
+    else:
+        rsync = plumbum.local['rsync']['-a']
+        for exclude in excludes:
+            rsync = rsync['--exclude=%s' % (exclude,)]
+        rsync[src_path_str, dest_path_str]()
     out_dim(' done.\n')
 
 INOTIFY_CHANGE_EVENTS = ['modify', 'attrib', 'move', 'create', 'delete']
@@ -103,7 +125,7 @@ def mkdirp(context, path):
         else:
             raise Exception('Remote Windows not supported')
     else:
-        context['mkdir']['-p', path]()
+        context['mkdir']['-p', context.path(path)]()
 
 def get_num_cores(context):
     if context._is_windows:

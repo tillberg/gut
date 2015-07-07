@@ -48,7 +48,9 @@ def run_daemon_thread(fn):
             fn()
         except Exception as ex:
             if not shutting_down():
-                out('\n\n%s' % (ex,))
+                out('\n\n')
+                import traceback
+                traceback.print_exc(file=sys.stderr)
                 shutdown(exit=False)
                 sys.exit(1)
     thread = threading.Thread(target=run)

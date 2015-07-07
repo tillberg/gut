@@ -3,8 +3,11 @@ import deps
 from terminal import out, out_dim, dim, quote, color_commit, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
 import util
 
+def exe_path(context):
+    return context.path(config.GUT_EXE_PATH + '.exe' if context._is_windows else config.GUT_EXE_PATH)
+
 def gut(context):
-    return context[context.path(config.GUT_EXE_PATH)]
+    return context[exe_path(context)]
 
 def get_version(context):
     return gut(context)['--version']()

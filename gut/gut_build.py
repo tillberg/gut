@@ -25,7 +25,7 @@ def rename_git_to_gut(s):
     )
 
 def rename_git_to_gut_recursive(root_path):
-    for root, dirs, files in os.walk(root_path):
+    for root, folders, files in os.walk(root_path):
         for orig_filename in files:
             if orig_filename.startswith('.git'):
                 # don't touch .gitignores or .gitattributes files
@@ -50,7 +50,7 @@ def rename_git_to_gut_recursive(root_path):
                 contents = contents.replace("if (c != 'i' && c != 'I'", "if (c != 'u' && c != 'U'")
             if filename == 'GUT-VERSION-GEN':
                 # GUT-VERSION-GEN attempts to use `git` to look at the git repo's history in order to determine the version string.
-                # This prevents gut-gui/GUT-VERSION-GEN from calling `gut` and causing `gut_proxy` from recursively building `gut` in an infinite loop.
+                # This prevents gut-gui/GUT-VERSION-GEN from calling `gut` and causing `gut_proxy` to recursively build `gut` in an infinite loop.
                 contents = contents.replace('gut ', 'git ')
             if contents != orig_contents:
                 # print('rewriting %s' % (path,))
@@ -59,9 +59,9 @@ def rename_git_to_gut_recursive(root_path):
                     os.chmod(path, stat.S_IWRITE)
                 with codecs.open(path, 'w', 'utf-8') as fd:
                     fd.write(contents)
-        orig_dirs = tuple(dirs)
-        del dirs[:]
-        for folder in orig_dirs:
+        orig_folders = tuple(folders)
+        del folders[:]
+        for folder in orig_folders:
             if folder == '.git':
                 # don't recurse into .git
                 continue
@@ -71,15 +71,16 @@ def rename_git_to_gut_recursive(root_path):
             if orig_path != path:
                 # print('renaming folder %s -> %s' % (orig_path, path))
                 shutil.move(orig_path, path)
-            dirs.append(folder)
+            folders.append(folder)
 
-def git_hard_reset_and_clean(context, repo_url, repo_path, version):
-    with context.cwd(context.path(repo_path)):
+def git_hard_reset_and_clean(repo_url, repo_path, version):
+    local = plumbum.local
+    with local.cwd(local.path(repo_path)):
         # Do a little sanity-check to make sure we're not running these (destructive) operations in some other repo:
-        if not repo_url in context['git']['remote', '-v']():
+        if not repo_url in local['git']['remote', '-v']():
             raise Exception('I think I might be trying to git-reset the wrong repo.')
-        context['git']['reset', '--hard', version]()
-        context['git']['clean', '-fdx']()
+        local['git']['reset', '--hard', version]()
+        local['git']['clean', '-fdx']()
 
 def git_clone_update(repo_url, src_path, version, rewrite_gut=True):
     local = plumbum.local
@@ -94,12 +95,13 @@ def git_clone_update(repo_url, src_path, version, rewrite_gut=True):
         local['git']['clone', repo_url, gut_src_path]()
         out_dim(' done.\n')
     with local.cwd(gut_src_path):
+        local['git']['config', 'core.autocrlf', 'false']()
         if not local['git']['rev-parse', version](retcode=None).strip():
             out(dim('Updating git in order to upgrade to ') + version + dim('...'))
             local['git']['fetch']()
             out_dim(' done.\n')
     out(dim('Checking out fresh copy of git ') + version + dim('...'))
-    git_hard_reset_and_clean(local, repo_url, gut_src_path, version)
+    git_hard_reset_and_clean(repo_url, gut_src_path, version)
     with local.cwd(gut_src_path):
         if rewrite_gut:
             out_dim(' done.\nRewriting git to gut...')
@@ -115,19 +117,19 @@ def prepare(build_context):
 
 def unprepare(build_context):
     if build_context._is_windows:
-        git_hard_reset_and_clean(build_context, config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
-        git_hard_reset_and_clean(build_context, config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
+        git_hard_reset_and_clean(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
+        git_hard_reset_and_clean(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
     else:
-        git_hard_reset_and_clean(build_context, config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
+        git_hard_reset_and_clean(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
 def windows_path_to_mingw_path(path):
     return u'/' + unicode(path).replace(':', '').replace('\\', '/')
 
-def build(context):
-    gut_src_path = context.path(config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH)
+def build(context, _build_path):
+    build_path = context.path(_build_path)
     gut_dist_path = context.path(config.GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (windows_path_to_mingw_path(gut_dist_path) if context._is_windows else gut_dist_path,)
-    with context.cwd(gut_src_path):
+    with context.cwd(build_path):
         def build():
             def make(args):
                 if context._is_windows:
@@ -138,7 +140,7 @@ def build(context):
             if not context._is_windows:
                 out(dim('Configuring Makefile for gut...'))
                 make([install_prefix, 'configure'])
-                context[gut_src_path / 'configure'][install_prefix]()
+                context[build_path / 'configure'][install_prefix]()
                 out(dim(' done.\n'))
             parallelism = util.get_num_cores(context)
             out(dim('Building gut using up to ') + parallelism + dim(' processes...'))

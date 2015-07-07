@@ -18,18 +18,22 @@ import gut_build
 import util
 
 def ensure_build(context):
-    if not context.path(config.GUT_EXE_PATH).exists() or config.GIT_VERSION.lstrip('v') not in gut.get_version(context):
+    desired_git_version = config.GIT_WIN_VERSION if context._is_windows else config.GIT_VERSION
+    if not gut.exe_path(context).exists() or desired_git_version.lstrip('v') not in gut.get_version(context):
         out(dim('Need to build gut on ') + context._name_ansi + dim('.\n'))
         gut_build.ensure_gut_folders(context)
         gut_build.prepare(context)
         if context != plumbum.local:
             # If we're building remotely, rsync the prepared source to the remote host
-            util.rsync(plumbum.local, config.GUT_SRC_PATH, context, config.GUT_SRC_PATH, excludes=['.git', 't'])
-        gut_build.build(context)
+            build_path = config.GUT_SRC_TMP_PATH
+            util.rsync(plumbum.local, config.GUT_SRC_PATH, context, build_path, excludes=['.git', 't'])
+        else:
+            build_path = config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH
+        gut_build.build(context, build_path)
         out_dim('Cleaning up...')
         gut_build.unprepare(context)
         if context != plumbum.local:
-            gut_build.unprepare(plumbum.local)
+            context['rm']['-r', context.path(config.GUT_SRC_TMP_PATH)]()
         out_dim(' done.\n')
         return True
     return False
@@ -200,7 +204,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 def main():
     action = len(sys.argv) >= 2 and sys.argv[1]
     if action in config.ALL_GUT_COMMANDS:
-        gut_exe_path = plumbum.local.path(config.GUT_EXE_PATH)
+        gut_exe_path = gut.exe_path(plumbum.local)
         # Build gut if needed
         if not plumbum.local.path(config.GUT_EXE_PATH).exists():
             local = plumbum.local
