@@ -1,3 +1,10 @@
+try:
+    import colorama
+except ImportError:
+    pass
+else:
+    colorama.init()
+
 import config
 import os
 import re
