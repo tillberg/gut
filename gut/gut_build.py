@@ -105,16 +105,19 @@ def gut_prepare(build_context):
     else:
         git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
+def windows_path_to_mingw_path(path):
+    return u'/' + unicode(path).replace(':', '').replace('\\', '/')
+
 def gut_build(context):
     gut_src_path = context.path(config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH)
     gut_dist_path = context.path(config.GUT_DIST_PATH)
-    install_prefix = 'prefix=%s' % (gut_dist_path,)
+    install_prefix = 'prefix=%s' % (windows_path_to_mingw_path(gut_dist_path) if context._is_windows else gut_dist_path,)
     with context.cwd(gut_src_path):
         def build():
             def make(args):
                 if context._is_windows:
-                    make_path = '/' + str(context.path(config.MSYSGIT_PATH) / 'bin/make.exe').replace(':', '').replace('\\', '/')
-                    context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin; ' + ' '.join([make_path] + args))]()
+                    make_path = windows_path_to_mingw_path(context.path(config.MSYSGIT_PATH) / 'bin/make.exe')
+                    context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin NO_GETTEXT=1 ' + ' '.join([make_path] + args))]()
                 else:
                     context['make'][args]()
             if not context._is_windows:
