@@ -1,10 +1,16 @@
 import os.path
 
 GIT_REPO_URL = 'https://github.com/git/git.git'
-GIT_VERSION = 'v2.4.5'
+GIT_VERSION = 'v2.4.4'
+GIT_WIN_REPO_URL = 'https://github.com/git-for-windows/git.git'
+GIT_WIN_VERSION = 'v2.4.4'
+MSYSGIT_REPO_URL = 'https://github.com/msysgit/msysgit.git'
+MSYSGIT_VERSION = 'Git-1.9.5-preview20150319'
 
 GUT_PATH = '~/.guts'
 GUT_SRC_PATH = os.path.join(GUT_PATH, 'gut-src')
+GUT_WIN_SRC_PATH = os.path.join(GUT_PATH, 'gut-win-src')
+MSYSGIT_PATH = os.path.join(GUT_PATH, 'msysgit')
 GUT_DIST_PATH = os.path.join(GUT_PATH, 'gut-build')
 GUT_EXE_PATH = os.path.join(GUT_DIST_PATH, 'bin/gut')
 

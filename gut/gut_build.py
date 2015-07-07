@@ -12,6 +12,7 @@ import util
 
 def ensure_gut_folders(context):
     util.mkdirp(context, config.GUT_SRC_PATH)
+    util.mkdirp(context, config.GUT_WIN_SRC_PATH)
     util.mkdirp(context, config.GUT_DIST_PATH)
 
 def rename_git_to_gut(s):
@@ -72,27 +73,37 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             dirs.append(folder)
 
-def gut_prepare():
+def git_clone_update(repo_url, src_path, version, rewrite_gut=True):
     local = plumbum.local
     ensure_gut_folders(local)
-    gut_src_path = local.path(config.GUT_SRC_PATH)
+    gut_src_path = local.path(src_path)
     if not (gut_src_path / '.git').exists():
-        out(dim('Cloning ') + config.GIT_REPO_URL + dim(' into ') + color_path(gut_src_path) + dim('...'))
-        local['git']['clone', config.GIT_REPO_URL, gut_src_path]()
+        out(dim('Cloning ') + repo_url + dim(' into ') + color_path(gut_src_path) + dim('...'))
+        local['git']['clone', repo_url, gut_src_path]()
+        out_dim(' done.\n')
+    if not (gut_src_path / '.git').exists():
+        out(dim('Cloning ') + repo_url + dim(' into ') + color_path(gut_src_path) + dim('...'))
+        local['git']['clone', repo_url, gut_src_path]()
         out_dim(' done.\n')
     with local.cwd(gut_src_path):
-        if not local['git']['rev-parse', config.GIT_VERSION](retcode=None).strip():
-            out(dim('Updating git in order to upgrade to ') + config.GIT_VERSION + dim('...'))
+        if not local['git']['rev-parse', version](retcode=None).strip():
+            out(dim('Updating git in order to upgrade to ') + version + dim('...'))
             local['git']['fetch']()
             out_dim(' done.\n')
-        out(dim('Checking out fresh copy of git ') + config.GIT_VERSION + dim('...'))
-        local['git']['reset', '--hard', config.GIT_VERSION]()
+        out(dim('Checking out fresh copy of git ') + version + dim('...'))
+        local['git']['reset', '--hard', version]()
         local['git']['clean', '-fd']()
-        local['make']['clean']()
-        out_dim(' done.\nRewriting git to gut...')
-        rename_git_to_gut_recursive('%s' % (gut_src_path,))
+        if rewrite_gut:
+            out_dim(' done.\nRewriting git to gut...')
+            rename_git_to_gut_recursive('%s' % (gut_src_path,))
         out_dim(' done.\n')
 
+def gut_prepare(build_context):
+    if build_context._is_windows:
+        git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION, rewrite_gut=False)
+        git_clone_update(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
+    else:
+        git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
 def gut_build(context):
     gut_src_path = context.path(config.GUT_SRC_PATH)
