@@ -107,6 +107,6 @@ def mkdirp(context, path):
 
 def get_num_cores(context):
     if context._is_windows:
-        return context['wmic']['CPU', 'Get', '/Format:List']().strip().split('=')[-1]
+        return context['wmic']['CPU', 'Get', 'NumberOfLogicalProcessors', '/Format:List']().strip().split('=')[-1]
     else:
         return context['getconf']['_NPROCESSORS_ONLN']().strip()

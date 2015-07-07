@@ -17,8 +17,9 @@ BREW_DEPS = ['autoconf', 'fswatch', 'autossh']
 APT_GET_DEPS = ['gettext', 'autoconf', 'inotify-tools', 'autossh']
 
 def missing_dependency(context, name, retry_failed=None):
-    has_apt_get = context['which']['apt-get'](retcode=None) != ''
-    if auto_install_deps and not retry_failed:
+    has_apt_get = not context._is_windows and context['which']['apt-get'](retcode=None) != ''
+    has_homebrew = not context._is_windows and context['which']['brew'](retcode=None) != ''
+    if (auto_install_deps and not retry_failed) and (has_apt_get or has_homebrew):
         out(dim('Attempting to automatically install missing dependency ') + name + dim('...\n'))
         if has_apt_get:
             # This needs to go to the foreground in case it has a password prompt
@@ -30,14 +31,15 @@ def missing_dependency(context, name, retry_failed=None):
         quote(context, output)
     else:
         out(color_error('\nYou seem to be missing a required dependency, ') + name + color_error(', on ') + context._name_ansi + color_error('.'))
-        out(dim('\nTo install just this dependency, you could try running this:\n$ '))
-        if has_apt_get:
-            out('sudo apt-get install ' + name)
-        else:
-            out('brew install ' + name)
-        if not auto_install_deps:
-            out(dim('\n\nOr if you\'d prefer, I\'ll try to automatically install dependencies as needed with the ') +
-                bright('--install-deps') + dim(' flag.\n'))
+        if has_apt_get or has_homebrew:
+            out(dim('\nTo install just this dependency, you could try running this:\n$ '))
+            if has_apt_get:
+                out('sudo apt-get install ' + name)
+            else:
+                out('brew install ' + name)
+            if not auto_install_deps:
+                out(dim('\n\nOr if you\'d prefer, I\'ll try to automatically install dependencies as needed with the ') +
+                    bright('--install-deps') + dim(' flag.\n'))
         # out(dim('\n\nOr to install all required dependencies, you could try running this instead:\n$ '))
         # if has_apt_get:
         #     out('sudo apt-get install ' + ' '.join(APT_GET_DEPS))

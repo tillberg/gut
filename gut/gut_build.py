@@ -106,18 +106,26 @@ def gut_prepare(build_context):
         git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
 def gut_build(context):
-    gut_src_path = context.path(config.GUT_SRC_PATH)
+    gut_src_path = context.path(config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH)
     gut_dist_path = context.path(config.GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (gut_dist_path,)
     with context.cwd(gut_src_path):
         def build():
-            out(dim('Configuring Makefile for gut...'))
-            context['make'][install_prefix, 'configure']()
-            context[gut_src_path / 'configure'][install_prefix]()
+            def make(args):
+                if context._is_windows:
+                    make_path = '/' + str(context.path(config.MSYSGIT_PATH) / 'bin/make.exe').replace(':', '').replace('\\', '/')
+                    context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin; ' + ' '.join([make_path] + args))]()
+                else:
+                    context['make'][args]()
+            if not context._is_windows:
+                out(dim('Configuring Makefile for gut...'))
+                make([install_prefix, 'configure'])
+                context[gut_src_path / 'configure'][install_prefix]()
+                out(dim(' done.\n'))
             parallelism = util.get_num_cores(context)
-            out(dim(' done.\nBuilding gut using up to ') + parallelism + dim(' processes...'))
-            context['make'][install_prefix, '-j', parallelism]()
+            out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
+            make([install_prefix, '-j', parallelism])
             out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
-            context['make'][install_prefix, 'install']()
+            make([install_prefix, 'install'])
             out(dim(' done.\n'))
         deps.retry_method(context, build)
