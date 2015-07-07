@@ -113,7 +113,14 @@ def bright(text):
 def color_host_path(context, path):
     return (context._name_ansi + dim(':') if not context._is_local else '') + color_path(context.path(path))
 
+no_color = False
+def disable_color():
+    global no_color
+    no_color = True
+
 def out(text):
+    if no_color:
+        text = RE_ANSI.sub('', text)
     sys.stderr.write(text)
     sys.stderr.flush()
 

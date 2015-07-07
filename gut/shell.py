@@ -10,6 +10,7 @@ import plumbum
 import patch_plumbum; patch_plumbum.patch_darwin_stat()
 
 import config
+import terminal as term
 from terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit, run_daemon_thread
 import deps
 import gut
@@ -207,9 +208,12 @@ def main():
         parser = argparse.ArgumentParser()
         parser.add_argument('action', choices=['build', 'sync'])
         parser.add_argument('--install-deps', action='store_true')
+        parser.add_argument('--no-color', action='store_true')
         def parse_args():
             args = parser.parse_args()
             deps.auto_install_deps = args.install_deps
+            if args.no_color:
+                term.disable_color()
             return args
         if action == 'build':
             args = parse_args()
