@@ -93,3 +93,14 @@ def restart_on_change(exe_path):
                 out('error restarting: %s\n' % (ex,))
                 time.sleep(1)
     run_daemon_thread(run)
+
+def mkdirp(context, path):
+    if context._is_windows:
+        if context == plumbum.local:
+            _path = os.path.normpath(os.path.expanduser(path))
+            if not os.path.exists(_path):
+                os.makedirs(_path)
+        else:
+            raise Exception('Remote Windows not supported')
+    else:
+        context['mkdir']['-p', path]()

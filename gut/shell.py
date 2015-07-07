@@ -53,6 +53,7 @@ def init_context(context, sync_path=None, host=None, user=None):
     context._is_local = not host
     context._is_osx = context.uname == 'Darwin'
     context._is_linux = context.uname == 'Linux'
+    context._is_windows = context.uname == 'Windows'
     context._ssh_address = (('%s@' % (user,) if user else '') + host) if host else ''
     context._sync_path = color_host_path(context, sync_path)
     if context._is_osx:

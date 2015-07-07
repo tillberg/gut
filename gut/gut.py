@@ -1,6 +1,7 @@
 import config
 import deps
 from terminal import out, out_dim, dim, quote, color_commit, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
+import util
 
 def gut(context):
     return context[context.path(config.GUT_EXE_PATH)]
@@ -13,7 +14,7 @@ def rev_parse_head(context):
 
 def init(context, _sync_path):
     sync_path = context.path(_sync_path)
-    context['mkdir']['-p', sync_path]()
+    util.mkdirp(context, sync_path)
     with context.cwd(sync_path):
         if not (sync_path / '.gut').exists():
             quote(context, gut(context)['init']())

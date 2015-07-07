@@ -8,10 +8,11 @@ import plumbum
 import config
 import deps
 from terminal import out, out_dim, dim, color_path
+import util
 
 def ensure_gut_folders(context):
-    context['mkdir']['-p', context.path(config.GUT_SRC_PATH)]()
-    context['mkdir']['-p', context.path(config.GUT_DIST_PATH)]()
+    util.mkdirp(context, config.GUT_SRC_PATH)
+    util.mkdirp(context, config.GUT_DIST_PATH)
 
 def rename_git_to_gut(s):
     return (s
