@@ -1,4 +1,5 @@
 import sys
+import traceback
 
 import plumbum
 
@@ -78,7 +79,6 @@ def retry_method(context, cb):
             missing_dep_name = divine_missing_dependency(ex.message)
         else:
             break
-        import traceback
         if missing_dep_name:
             out(color_error(' failed (missing ') + missing_dep_name + color_error(')') + dim('.\n\n'))
             traceback.print_exc(file=sys.stderr)

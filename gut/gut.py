@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import config
 from terminal import out, out_dim, dim, quote, color_commit, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
 import util
@@ -29,19 +31,21 @@ def ensure_initial_commit(context, _sync_path):
             quote(context, gut(context)['add']['.gutignore']())
             quote(context, gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
 
-def commit(context, path, update_untracked=False):
+def commit(context, path, prefix, update_untracked=False):
     with context.cwd(context.path(path)):
+        # start = datetime.now()
         head_before = rev_parse_head(context)
-        out(dim('Checking ') + context._name_ansi + dim(' for changes...'))
+        out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
         if update_untracked:
-            gut(context)['rm', '--cached', '-r', '--ignore-unmatch', '--quiet', './']()
-        gut(context)['add', '--all', './']()
+            gut(context)['rm', '--cached', '-r', '--ignore-unmatch', '--quiet', prefix]()
+        gut(context)['add', '--all', prefix]()
         commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
         head_after = rev_parse_head(context)
         made_a_commit = head_before != head_after
         out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + dim('.\n'))
         if made_a_commit:
             quote(context, commit_out)
+        # quote(context, 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
         return made_a_commit
 
 def pull(context, path):
@@ -58,6 +62,7 @@ def setup_origin(context, path):
         gut(context)['remote', 'rm', 'origin'](retcode=None)
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (config.GUTD_CONNECT_PORT,)]()
         gut(context)['config', 'color.ui', 'always']()
+        gut(context)['config', 'core.ignoreStat', '1']()
         hostname = context['hostname']()
         gut(context)['config', 'user.name', hostname]()
         gut(context)['config', 'user.email', 'gut-sync@' + hostname]()

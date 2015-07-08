@@ -1,3 +1,9 @@
+import os
+import re
+import sys
+import threading
+import traceback
+
 try:
     import colorama
 except ImportError:
@@ -7,10 +13,6 @@ else:
 import plumbum
 
 import config
-import os
-import re
-import sys
-import threading
 
 GUT_HASH_DISPLAY_CHARS = 10
 
@@ -73,7 +75,6 @@ def run_daemon_thread(fn):
         except Exception as ex:
             if not shutting_down():
                 out('\n\n')
-                import traceback
                 traceback.print_exc(file=sys.stderr)
                 shutdown(exit=False)
                 sys.exit(1)

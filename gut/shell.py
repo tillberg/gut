@@ -5,6 +5,7 @@ import os
 import Queue
 import sys
 import time
+import traceback
 
 import plumbum
 import patch_plumbum; patch_plumbum.patch_darwin_stat()
@@ -145,7 +146,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         gut.setup_origin(local, local_path)
         gut.setup_origin(remote, remote_path)
 
-        def commit_and_update(src_system, update_untracked=False):
+        def commit_and_update(src_system, changed_paths=None, update_untracked=False):
             if src_system == 'local':
                 src_context = local
                 src_path = local_path
@@ -158,8 +159,25 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 dest_context = local
                 dest_path = local_path
                 dest_system = 'local'
-            if gut.commit(src_context, src_path, update_untracked=update_untracked):
-                gut.pull(dest_context, dest_path)
+
+            # Based on the set of changed paths, figure out what we need to pass to `gut add` in order to capture everything
+            if not changed_paths:
+                prefix = './'
+            elif len(changed_paths) == 1:
+                (prefix,) = changed_paths
+            else:
+                # commonprefix operates on strings, not paths; so lop off the last bit of the path so that if we get two files within
+                # the same directory, e.g. "test/sarah" and "test/sally", we'll look in "test/" instead of in "test/sa".
+                separator = '\\' if src_context._is_windows else '/'
+                prefix = os.path.commonprefix(changed_paths).rpartition(separator)[0] or './'
+            # out('system: %s\npaths: %s\ncommon prefix: %s\n' % (src_system, ' '.join(changed_paths) if changed_paths else '', prefix))
+
+            try:
+                if gut.commit(src_context, src_path, prefix, update_untracked=update_untracked):
+                    gut.pull(dest_context, dest_path)
+            except plumbum.commands.ProcessExecutionError:
+                out('\n\nError during commit-and-pull:\n')
+                traceback.print_exc(file=sys.stderr)
 
         event_queue = Queue.Queue()
         util.watch_for_changes(local, local_path, 'local', event_queue)
@@ -167,19 +185,22 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         # The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
         # commit_and_update calls below and the time that the filesystem watches are attached.
 
-        commit_and_update('remote', update_untracked=True)
-        commit_and_update('local', update_untracked=True)
+        # Since update_untracked=True is too expensive here, if the user made offline changes to a .gutignore file, they'll
+        # to `touch` it while gut-sync is running in order to update the list of untracked files. A more sophisticated approach
+        # might be to peek at the terminal output of gut-commit and scan it for changes to .gutignore files.
+        commit_and_update('remote')
+        commit_and_update('local')
         gut.pull(remote, remote_path)
         gut.pull(local, local_path)
 
-        changed = set()
+        changed = {}
         changed_ignore = set()
         while not shutting_down():
             try:
                 event = event_queue.get(True, 0.1 if changed else 10000)
             except Queue.Empty:
-                for system in changed:
-                    commit_and_update(system, update_untracked=(system in changed_ignore))
+                for system, paths in changed.iteritems():
+                    commit_and_update(system, paths, update_untracked=(system in changed_ignore))
                 changed.clear()
                 changed_ignore.clear()
             else:
@@ -187,7 +208,9 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 # Ignore events inside the .gut folder; these should also be filtered out in inotifywait/fswatch/etc if possible
                 path_parts = path.split(os.sep)
                 if not '.gut' in path_parts:
-                    changed.add(system)
+                    if system not in changed:
+                        changed[system] = set()
+                    changed[system].add(path)
                     if path_parts[-1] == '.gutignore':
                         changed_ignore.add(system)
                         # out('changed_ignore %s on %s\n' % (path, system))

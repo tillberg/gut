@@ -91,8 +91,8 @@ machinery isn't quite as fast/efficient as paramiko, but it might work for you.
 Supported OSes
 ==============
 
-**gut** runs on **OSX** and **Ubuntu** as both the local and remote hosts, and on **Windows** as the
-local host.
+**gut** has been tested on **OSX** and **Ubuntu** as both the local and remote hosts, and on
+**Windows** as the local host (i.e. with OSX or Ubuntu on the other end).
 
 Gut is like Git, but with more U and less I
 ===========================================
