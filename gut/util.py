@@ -44,7 +44,9 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     out_dim(' done.\n')
 
 INOTIFY_CHANGE_EVENTS = ['modify', 'attrib', 'move', 'create', 'delete']
-def append_inotify_change_events(watcher):
+def append_inotify_change_events(context, watcher):
+    if context._is_windows:
+        return watcher['--event', ','.join(INOTIFY_CHANGE_EVENTS)]
     for event in INOTIFY_CHANGE_EVENTS:
         watcher = watcher['--event', event]
     return watcher
@@ -57,8 +59,11 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             watch_type = get_cmd(context, ['inotifywait', 'fswatch'])
             watcher = None
             if watch_type == 'inotifywait':
-                watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', '%w%f', '--exclude', '\.gut/']
-                watcher = append_inotify_change_events(watcher)
+                # inotify-win has slightly different semantics (and a completely different regex engine) than inotify-tools
+                format_str = '%w\%f' if context._is_windows else '%w%f'
+                exclude_str = '\\.gut($|\\\\)' if context._is_windows else '\.gut/'
+                watcher = context['inotifywait']['--quiet', '--monitor', '--recursive', '--format', format_str, '--exclude', exclude_str]
+                watcher = append_inotify_change_events(context, watcher)
                 watcher = watcher['./']
             elif watch_type == 'fswatch':
                 watcher = context['fswatch']['./']
@@ -106,7 +111,7 @@ def restart_on_change(exe_path):
     def run():
         local = plumbum.local
         watch_path = os.path.dirname(os.path.abspath(__file__))
-        changed = append_inotify_change_events(local['inotifywait'])[local.path(watch_path)]() # blocks until there's a change
+        changed = append_inotify_change_events(local, local['inotifywait'])[local.path(watch_path)]() # blocks until there's a change
         out_dim('\n(dev-mode) Restarting due to [%s]...\n' % (changed.strip(),))
         while True:
             try:

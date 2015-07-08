@@ -82,38 +82,38 @@ def git_hard_reset_and_clean(repo_url, repo_path, version):
         local['git']['reset', '--hard', version]()
         local['git']['clean', '-fdx']()
 
-def git_clone_update(repo_url, src_path, version, rewrite_gut=True):
+def git_clone_update(repo_url, _local_path, version):
     local = plumbum.local
     ensure_gut_folders(local)
-    gut_src_path = local.path(src_path)
-    if not (gut_src_path / '.git').exists():
-        out(dim('Cloning ') + repo_url + dim(' into ') + color_path(gut_src_path) + dim('...'))
-        local['git']['clone', repo_url, gut_src_path]()
+    local_path = local.path(_local_path)
+    if not (local_path / '.git').exists():
+        out(dim('Cloning ') + repo_url + dim(' into ') + color_path(local_path) + dim('...'))
+        local['git']['clone', repo_url, local_path]()
         out_dim(' done.\n')
-    if not (gut_src_path / '.git').exists():
-        out(dim('Cloning ') + repo_url + dim(' into ') + color_path(gut_src_path) + dim('...'))
-        local['git']['clone', repo_url, gut_src_path]()
-        out_dim(' done.\n')
-    with local.cwd(gut_src_path):
+    with local.cwd(local_path):
+        # Prevent windows from checking out CRLF line endings and then syncing them to a linux box, which subsequently
+        # runs into weird errors due to the CRLFs:
         local['git']['config', 'core.autocrlf', 'false']()
         if not local['git']['rev-parse', version](retcode=None).strip():
-            out(dim('Updating git in order to upgrade to ') + version + dim('...'))
+            out(dim('Updating ') + repo_url + dim(' in order to upgrade to ') + version + dim('...'))
             local['git']['fetch']()
             out_dim(' done.\n')
-    out(dim('Checking out fresh copy of git ') + version + dim('...'))
-    git_hard_reset_and_clean(repo_url, gut_src_path, version)
-    with local.cwd(gut_src_path):
-        if rewrite_gut:
-            out_dim(' done.\nRewriting git to gut...')
-            rename_git_to_gut_recursive('%s' % (gut_src_path,))
+    out(dim('Checking out ') + version + dim('...'))
+    git_hard_reset_and_clean(repo_url, local_path, version)
     out_dim(' done.\n')
 
 def prepare(build_context):
+    def rewrite(gut_src_path):
+        out_dim('Rewriting git to gut...')
+        rename_git_to_gut_recursive(unicode(plumbum.local.path(gut_src_path)))
+        out_dim(' done.\n')
     if build_context._is_windows:
-        git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION, rewrite_gut=False)
+        git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
         git_clone_update(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
+        rewrite(config.GUT_WIN_SRC_PATH)
     else:
         git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
+        rewrite(config.GUT_SRC_PATH)
 
 def unprepare(build_context):
     if build_context._is_windows:

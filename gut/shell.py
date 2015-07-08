@@ -69,6 +69,8 @@ def init_context(context, sync_path=None, host=None, user=None):
     if context._is_osx:
         # Because .profile vs .bash_profile vs .bashrc is probably not right, and this is where homebrew installs stuff, by default
         context.env['PATH'] = context.env['PATH'] + ':/usr/local/bin'
+    if context._is_windows:
+        context.env.path.append(context.path(config.INOTIFY_WIN_PATH))
 
 def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False, keyfile=None):
     def run():

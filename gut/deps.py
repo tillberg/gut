@@ -2,6 +2,7 @@ import sys
 
 import plumbum
 
+import config
 from terminal import shutdown, out, out_dim, dim, quote, bright, color_error
 
 auto_install_deps = False
@@ -17,6 +18,14 @@ BREW_DEPS = ['autoconf', 'fswatch', 'autossh']
 APT_GET_DEPS = ['gettext', 'autoconf', 'inotify-tools', 'autossh']
 
 def missing_dependency(context, name, retry_failed=None):
+    if context._is_windows and name == 'inotify-tools':
+        import gut_build # late import due to circular dependency :(
+        gut_build.git_clone_update(config.INOTIFY_WIN_REPO_URL, config.INOTIFY_WIN_PATH, config.INOTIFY_WIN_VERSION)
+        out(dim('Building ') + 'inotify-win' + dim('...'))
+        with context.cwd(context.path(config.INOTIFY_WIN_PATH)):
+            context['cmd']['/c', '%WINDIR%\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe /t:exe /out:inotifywait.exe src\\*.cs']()
+        out(' done.\n')
+        return
     has_apt_get = not context._is_windows and context['which']['apt-get'](retcode=None) != ''
     has_homebrew = not context._is_windows and context['which']['brew'](retcode=None) != ''
     if (auto_install_deps and not retry_failed) and (has_apt_get or has_homebrew):

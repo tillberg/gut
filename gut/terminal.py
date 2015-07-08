@@ -30,7 +30,7 @@ def get_cmd(context, cmds):
     return None
 
 def get_pidfile_path(context, process_name):
-    return context.path(os.path.join(config.GUT_PATH, '%s.pid' % (process_name,)))
+    return context.path('/'.join([config.GUT_PATH, '%s.pid' % (process_name,)]))
 
 def kill_previous_process(context, process_name):
     # As usual, Darwin doesn't have the --pidfile flag, but it does have -F, because we like obscurity

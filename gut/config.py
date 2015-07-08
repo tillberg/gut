@@ -6,12 +6,15 @@ GIT_WIN_REPO_URL = 'https://github.com/git-for-windows/git.git'
 GIT_WIN_VERSION = 'v2.4.4'
 MSYSGIT_REPO_URL = 'https://github.com/msysgit/msysgit.git'
 MSYSGIT_VERSION = 'Git-1.9.5-preview20150319'
+INOTIFY_WIN_REPO_URL = 'https://github.com/thekid/inotify-win.git'
+INOTIFY_WIN_VERSION = '9b547cfde0f546df8abeebf47ec36f36d7bd91ef'
 
 GUT_PATH = '~/.guts'
 GUT_SRC_PATH = '/'.join([GUT_PATH, 'gut-src'])
 GUT_SRC_TMP_PATH = '/'.join([GUT_PATH, 'gut-src-tmp'])
 GUT_WIN_SRC_PATH = '/'.join([GUT_PATH, 'gut-win-src'])
 MSYSGIT_PATH = '/'.join([GUT_PATH, 'msysgit'])
+INOTIFY_WIN_PATH = '/'.join([GUT_PATH, 'inotify-win'])
 GUT_DIST_PATH = '/'.join([GUT_PATH, 'gut-build'])
 GUT_EXE_PATH = '/'.join([GUT_DIST_PATH, 'bin/gut'])
 
@@ -30,6 +33,7 @@ DEFAULT_GUTIGNORE = '''
 '''.lstrip()
 
 ALL_GUT_COMMANDS = (
+    # These are all the names of executables in libexec/gut-core/
     'add',
     'am',
     'annotate',
@@ -176,6 +180,6 @@ ALL_GUT_COMMANDS = (
     'verify-tag',
     'whatchanged',
     'write-tree',
-
+    # This is an extra special built-in (an alias for --version, I guess):
     'version',
 )

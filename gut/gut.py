@@ -1,5 +1,4 @@
 import config
-import deps
 from terminal import out, out_dim, dim, quote, color_commit, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
 import util
 
