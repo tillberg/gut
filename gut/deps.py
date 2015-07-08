@@ -38,7 +38,7 @@ def missing_dependency(context, name, retry_failed=None):
         else:
             out(dim('$ brew install ') + name + '\n')
             output = context['brew']['install', name].with_env(HOMEBREW_NO_EMOJI=1)()
-        quote(context, output)
+        quote(context._name_ansi, output)
     else:
         out(color_error('\nYou seem to be missing a required dependency, ') + name + color_error(', on ') + context._name_ansi + color_error('.'))
         if has_apt_get or has_homebrew:

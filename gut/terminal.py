@@ -52,8 +52,8 @@ def kill_previous_process(context, process_name):
                 return
             command = context['kill']['-f', pid]
         _, stdout, stderr = command.run(retcode=None)
-        quote(context, stdout)
-        quote(context, stderr)
+        quote(context._name_ansi, stdout)
+        quote(context._name_ansi, stderr)
 
 def save_process_pid(context, process_name, pid):
     my_path = get_pidfile_path(context, process_name)
@@ -161,13 +161,13 @@ def out(text):
 def out_dim(text):
     out(dim(text))
 
-def quote(context, text):
+def quote(name, text):
     for line in text.strip().split('\n'):
         # Avoid outputting lines that only contain control characters and whitespace
         if RE_ANSI.sub('', line).strip():
-            out(dim('[') + context._name_ansi + dim('] ') + line + '\n')
+            out(dim('[') + name + dim('] ') + line + '\n')
 
-def pipe_quote(stream, name):
+def pipe_quote(name, stream, announce_exit=True):
     def run():
         try:
             while not shutting_down():
@@ -179,6 +179,6 @@ def pipe_quote(stream, name):
         except Exception:
             if not shutting_down():
                 raise
-        if not shutting_down():
+        if announce_exit and not shutting_down():
             out('%s exited.\n' % (name,))
     run_daemon_thread(run)

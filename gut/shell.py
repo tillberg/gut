@@ -163,8 +163,9 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
             # Based on the set of changed paths, figure out what we need to pass to `gut add` in order to capture everything
             if not changed_paths:
                 prefix = './'
-            elif len(changed_paths) == 1:
-                (prefix,) = changed_paths
+            # This is kind of annoying because it regularly picks up .gutignored files, e.g. the ".#." files emacs drops:
+            # elif len(changed_paths) == 1:
+            #     (prefix,) = changed_paths
             else:
                 # commonprefix operates on strings, not paths; so lop off the last bit of the path so that if we get two files within
                 # the same directory, e.g. "test/sarah" and "test/sally", we'll look in "test/" instead of in "test/sa".

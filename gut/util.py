@@ -89,7 +89,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             else:
                 break
     run_daemon_thread(run)
-    pipe_quote(proc.stderr, 'watch_%s_err' % (event_prefix,))
+    pipe_quote('watch_%s_err' % (event_prefix,), proc.stderr)
 
 def start_ssh_tunnel(local, remote):
     cmd = get_cmd(local, ['autossh', 'ssh'])
@@ -104,8 +104,8 @@ def start_ssh_tunnel(local, remote):
     proc = command.popen()
     save_process_pid(local, cmd, proc.pid)
     # If we got something on autossh_err like: "channel_setup_fwd_listener_tcpip: cannot listen to port: 34925", we could try `fuser -k -n tcp 34925`
-    pipe_quote(proc.stdout, cmd + '_out')
-    pipe_quote(proc.stderr, cmd + '_err')
+    pipe_quote(cmd + '_out', proc.stdout)
+    pipe_quote(cmd + '_err', proc.stderr)
 
 def restart_on_change(exe_path):
     def run():

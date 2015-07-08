@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import config
-from terminal import out, out_dim, dim, quote, color_commit, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
+from terminal import out, out_dim, dim, quote, color_commit, color_error, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
 import util
 
 def exe_path(context):
@@ -21,15 +21,15 @@ def init(context, _sync_path):
     util.mkdirp(context, sync_path)
     with context.cwd(sync_path):
         if not (sync_path / '.gut').exists():
-            quote(context, gut(context)['init']())
+            quote(context._name_ansi, gut(context)['init']())
 
 def ensure_initial_commit(context, _sync_path):
     with context.cwd(sync_path):
         head = rev_parse_head(context)
         if head == 'HEAD':
             (sync_path / '.gutignore').write(config.DEFAULT_GUTIGNORE)
-            quote(context, gut(context)['add']['.gutignore']())
-            quote(context, gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
+            quote(context._name_ansi, gut(context)['add']['.gutignore']())
+            quote(context._name_ansi, gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
 
 def commit(context, path, prefix, update_untracked=False):
     with context.cwd(context.path(path)):
@@ -44,18 +44,32 @@ def commit(context, path, prefix, update_untracked=False):
         made_a_commit = head_before != head_after
         out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + dim('.\n'))
         if made_a_commit:
-            quote(context, commit_out)
+            quote(context._name_ansi, commit_out)
         # quote(context, 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
         return made_a_commit
 
 def pull(context, path):
     with context.cwd(context.path(path)):
-        out(dim('Pulling changes to ') + context._name_ansi + dim('...'))
+        out(dim('Downloading changes to ') + context._name_ansi + dim('...'))
         gut(context)['fetch', 'origin']()
-        # If the merge fails due to uncommitted changes, then we should pick them up in the next commit, which should happen very shortly thereafter
-        merge_out = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'](retcode=None)
-        out_dim(' done.\n')
-        quote(context, merge_out)
+        out(dim(' done.\n'))
+    def do_merge():
+        with context.cwd(context.path(path)):
+            out(dim('Merging changes to ') + context._name_ansi + dim('...'))
+            _, stdout, stderr = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'].run(retcode=None)
+            need_commit = 'Your local changes to the following files would be overwritten' in stderr
+            if need_commit:
+                out(color_error(' failed due to uncommitted changes.\n'))
+            else:
+                out(dim(' done.\n'))
+            quote(context._name_ansi, stdout)
+            quote(context._name_ansi, stderr)
+            return need_commit
+    if do_merge():
+        out(dim('Committing outstanding changes before retrying merge...\n'))
+        commit(context, path, './', update_untracked=True)
+        do_merge()
+
 
 def setup_origin(context, path):
     with context.cwd(context.path(path)):
@@ -78,5 +92,5 @@ def run_daemon(context, path):
     pidfile_opt = '--pid-file=%s' % (get_pidfile_path(context, 'gut-daemon'),)
     proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (config.GUTD_BIND_PORT,), repo_path].popen()
     active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
-    pipe_quote(proc.stdout, '%s_daemon_out' % (context._name,))
-    pipe_quote(proc.stderr, '%s_daemon_err' % (context._name,))
+    pipe_quote('%s_daemon_out' % (context._name,), proc.stdout)
+    pipe_quote('%s_daemon_err' % (context._name,), proc.stderr)
