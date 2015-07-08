@@ -92,7 +92,7 @@ def shutdown(exit=True):
     try:
         # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
-            out_dim('\nShutting down %s on %s...' % (process_name, context._name_ansi))
+            out(dim('\nShutting down ') + process_name + dim(' on ') + context._name_ansi + dim('...'))
             retries = 3
             while True:
                 try:
