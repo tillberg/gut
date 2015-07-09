@@ -27,3 +27,18 @@ def patch():
     plumbum.machines.remote.BaseRemoteMachine._path_getgid = _path_getgid
     plumbum.machines.remote.BaseRemoteMachine._path_stat = _path_stat
     plumbum.machines.remote.BaseRemoteMachine._path_link = _path_link
+
+    import os
+    def unlink(self):
+        try:
+            if hasattr(os, "symlink") or not self.isdir():
+                os.unlink(str(self))
+            else:
+                # windows: use rmdir for directories and directory symlinks
+                os.rmdir(str(self))
+        except OSError:
+            # file might already been removed (a race with other threads/processes)
+            _, ex, _ = sys.exc_info()
+            if ex.errno != errno.ENOENT:
+                raise
+    plumbum.path.local.LocalPath.unlink = unlink

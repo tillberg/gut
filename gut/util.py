@@ -145,7 +145,7 @@ def get_num_cores(context):
 def find_open_ports(contexts, num_ports):
     if not num_ports:
         return []
-    netstats = ' '.join([context['netstat']['-nal']() for context in contexts])
+    netstats = ' '.join([context['netstat']['-an' if context._is_windows else '-anl']() for context in contexts])
     ports = []
     random_ports = range(config.MIN_RANDOM_PORT, config.MAX_RANDOM_PORT + 1)
     random.shuffle(random_ports)
