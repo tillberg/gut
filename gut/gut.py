@@ -72,25 +72,31 @@ def pull(context, path):
         do_merge()
 
 
-def setup_origin(context, path):
+def setup_origin(context, path, tail_hash):
     with context.cwd(context.path(path)):
         gut(context)['remote', 'rm', 'origin'](retcode=None)
-        gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (config.GUTD_CONNECT_PORT,)]()
+        gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/%s/' % (config.GUTD_CONNECT_PORT, tail_hash)]()
         gut(context)['config', 'color.ui', 'always']()
         hostname = context['hostname']().strip()
         gut(context)['config', 'user.name', hostname]()
         gut(context)['config', 'user.email', 'gut-sync@' + hostname]()
 
-def run_daemon(context, path):
+def run_daemon(context, path, tail_hash):
     """
     Start a git-daemon on the host, bound to port GUTD_BIND_PORT on the *localhost* network interface only.
     `autossh` will create a tunnel to expose this port as GUTD_CONNECT_PORT on the other host.
     """
-    proc = None
+    base_path = context.path(config.GUT_DAEMON_PATH)
+    util.mkdirp(context, config.GUT_DAEMON_PATH)
+    symlink_path = base_path / tail_hash
     repo_path = context.path(path)
+    if symlink_path.exists():
+        symlink_path.unlink()
+    repo_path.symlink(symlink_path)
+    proc = None
     kill_previous_process(context, 'gut-daemon')
     pidfile_opt = '--pid-file=%s' % (get_pidfile_path(context, 'gut-daemon'),)
-    proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (repo_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (config.GUTD_BIND_PORT,), repo_path].popen()
+    proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (base_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (config.GUTD_BIND_PORT,), base_path].popen()
     active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
     pipe_quote('%s_daemon_out' % (context._name,), proc.stdout)
     pipe_quote('%s_daemon_err' % (context._name,), proc.stderr)

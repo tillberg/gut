@@ -17,6 +17,7 @@ MSYSGIT_PATH = '/'.join([GUT_PATH, 'msysgit'])
 INOTIFY_WIN_PATH = '/'.join([GUT_PATH, 'inotify-win'])
 GUT_DIST_PATH = '/'.join([GUT_PATH, 'gut-build'])
 GUT_EXE_PATH = '/'.join([GUT_DIST_PATH, 'bin/gut'])
+GUT_DAEMON_PATH = '/'.join([GUT_PATH, 'repos'])
 
 GUTD_BIND_PORT = 34924
 GUTD_CONNECT_PORT = 34925

@@ -100,27 +100,30 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 
         local_tail_hash = get_tail_hash(local, local_path)
         remote_tail_hash = get_tail_hash(remote, remote_path)
+        tail_hash = None
 
         util.start_ssh_tunnel(local, remote)
 
         def cross_init(src_context, src_path, dest_context, dest_path):
-            gut.run_daemon(src_context, src_path)
+            gut.run_daemon(src_context, src_path, tail_hash)
             gut.init(dest_context, dest_path)
-            gut.setup_origin(dest_context, dest_path)
+            gut.setup_origin(dest_context, dest_path, tail_hash)
             import time
             time.sleep(2) # Give the gut-daemon and SSH tunnel a moment to start up
             gut.pull(dest_context, dest_path)
-            gut.run_daemon(dest_context, dest_path)
+            gut.run_daemon(dest_context, dest_path, tail_hash)
 
         # Do we need to initialize local and/or remote gut repos?
         if not local_tail_hash or local_tail_hash != remote_tail_hash:
             out(dim('Local gut repo base commit: [') + color_commit(local_tail_hash) + dim(']\n'))
             out(dim('Remote gut repo base commit: [') + color_commit(remote_tail_hash) + dim(']\n'))
             if local_tail_hash and not remote_tail_hash:
+                tail_hash = local_tail_hash
                 assert_folder_empty(remote, remote_path)
                 out_dim('Initializing remote repo from local repo...\n')
-                cross_init(local, local_path, remote, remote_path)
+                cross_init(local, local_path, remote, remote_path, )
             elif remote_tail_hash and not local_tail_hash:
+                tail_hash = remote_tail_hash
                 assert_folder_empty(local, local_path)
                 out_dim('Initializing local folder from remote gut repo...\n')
                 cross_init(remote, remote_path, local, local_path)
@@ -131,6 +134,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 out_dim('Initializing local repo first...\n')
                 gut.init(local, local_path)
                 gut.ensure_initial_commit(local, local_path)
+                tail_hash = get_tail_hash(local, local_path)
                 out_dim('Initializing remote repo from local repo...\n')
                 cross_init(local, local_path, remote, remote_path)
             else:
@@ -139,12 +143,13 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 out(color_error('Remote initial commit hash: [') + color_commit(remote_tail_hash) + color_error(']\n'))
                 shutdown()
         else:
-            gut.run_daemon(local, local_path)
-            gut.run_daemon(remote, remote_path)
+            tail_hash = local_tail_hash
+            gut.run_daemon(local, local_path, tail_hash)
+            gut.run_daemon(remote, remote_path, tail_hash)
             # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
 
-        gut.setup_origin(local, local_path)
-        gut.setup_origin(remote, remote_path)
+        gut.setup_origin(local, local_path, tail_hash)
+        gut.setup_origin(remote, remote_path, tail_hash)
 
         def commit_and_update(src_system, changed_paths=None, update_untracked=False):
             if src_system == 'local':
