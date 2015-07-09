@@ -124,35 +124,61 @@ ANSI_BRIGHT = ansi(1)
 ANSI_DIM = ansi(2)
 ANSI_COLORS = {'grey': 30, 'red': 31, 'green': 32, 'yellow': 33, 'blue': 34, 'magenta': 35, 'cyan': 36, 'white': 37}
 
-def colored(color, text):
-    return ansi(ANSI_COLORS[color]) + unicode(text) + ANSI_RESET_COLOR
+RE_ANSI_MARK = re.compile('\(@(\w+)\)')
 
-def colored_gen(color):
-    def _colored(text):
-        return colored(color, text)
-    return _colored
-color_path = colored_gen('cyan')
-color_host = colored_gen('yellow')
-color_error = colored_gen('red')
+COLOR_PATH = ansi(ANSI_COLORS['cyan'])
+COLOR_HOST = ansi(ANSI_COLORS['yellow'])
+COLOR_ERROR = ansi(ANSI_COLORS['red'])
+COLOR_COMMIT = ansi(ANSI_COLORS['green'])
+
+def color_path(s):
+    return '(@path)%s(@r)' % (s,)
+
+def color_host(s):
+    return '(@host)%s(@r)' % (s,)
+
+def color_error(s):
+    return '(@error)%s(@r)' % (s,)
 
 def color_commit(commitish):
-    return colored('green', (commitish or 'None')[:GUT_HASH_DISPLAY_CHARS])
+    return '(@commit)%s(@r)' % (commitish or 'None')[:GUT_HASH_DISPLAY_CHARS]
 
 def dim(text):
-    return ANSI_DIM + unicode(text) + ANSI_RESET_ALL
+    return '(@dim)' + unicode(text) + '(@r)'
 
 def bright(text):
-    return ANSI_BRIGHT + unicode(text) + ANSI_RESET_ALL
+    return '(@bright)' + unicode(text) + '(@r)'
 
 def color_host_path(context, path):
-    return (context._name_ansi + dim(':') if not context._is_local else '') + color_path(context.path(path))
+    return (context._name_ansi + dim(':') if not context._is_local else '') + '(@path)' + unicode(context.path(path)) + '(@r)'
 
 no_color = False
 def disable_color():
     global no_color
     no_color = True
 
+def ansi_mark_replacer(matchobj):
+    code = matchobj.group(1)
+    if code == 'r':
+        return ANSI_RESET_ALL
+    elif code == 'error':
+        return COLOR_ERROR
+    elif code == 'path':
+        return COLOR_PATH
+    elif code == 'host':
+        return COLOR_HOST
+    elif code == 'commit':
+        return COLOR_COMMIT
+    elif code == 'dim':
+        return ANSI_DIM
+    elif code == 'bright':
+        return ANSI_BRIGHT
+    else:
+        # Don't filter unrecognized text
+        return '(@' + code + ')'
+
 def out(text):
+    text = RE_ANSI_MARK.sub(ansi_mark_replacer, text) + ANSI_RESET_ALL
     if no_color:
         text = RE_ANSI.sub('', text)
     sys.stderr.write(text)
@@ -166,9 +192,15 @@ def get_nameish(context, name):
 
 def check_text_for_errors(context, line):
     if 'Please increase the amount of inotify watches allowed per user' in line:
-        out('''
-(@error)You've hit the inotify max_user_watches limit on(@r) %s.
-'''.lstrip() % (context._name_ansi,))
+        out('(@error) *** You\'ve hit the inotify max_user_watches limit on (@r)%s(@error).\n' % (context._name_ansi,))
+        current_limit = context.path('/proc/sys/fs/inotify/max_user_watches').read().strip()
+        if current_limit:
+            out('(@error) *** The current limit (from /proc/sys/fs/inotify/max_user_watches) is (@r)%s(@error).\n' % (current_limit,))
+        if context._is_linux:
+            out('(@error) *** To increase this limit, something like this might work:\n')
+            out('(@error) *** echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p\n')
+            out('(@error) *** Alternatively, you could also try reducing the total number of directories in your\n')
+            out('(@error) *** gut repo by moving unused files to another folder.\n')
 
 def quote(context, name, text):
     nameish = get_nameish(context, name)
