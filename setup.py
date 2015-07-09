@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name = "gut",
-    version = "0.2.2",
+    version = "0.2.3",
     author = "Dan Tillberg",
     author_email = "dan@tillberg.us",
     description = ("Realtime bidirectional folder synchronization via modified git"),
