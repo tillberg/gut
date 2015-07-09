@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 import time
 
@@ -91,21 +92,20 @@ def watch_for_changes(context, path, event_prefix, event_queue):
     run_daemon_thread(run)
     pipe_quote('watch_%s_err' % (event_prefix,), proc.stderr)
 
-def start_ssh_tunnel(local, remote):
+def start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port):
     cmd = get_cmd(local, ['autossh', 'ssh'])
     if not cmd:
         deps.missing_dependency(local, 'ssh')
-    ssh_tunnel_opts = '%s:localhost:%s' % (config.GUTD_CONNECT_PORT, config.GUTD_BIND_PORT)
+    ssh_tunnel_opts = '%s:localhost:%s' % (gutd_connect_port, gutd_bind_port)
     kill_previous_process(local, cmd)
     command = local[cmd]
     if cmd == 'autossh' and local._is_osx:
-        command = command['-M', config.AUTOSSH_MONITOR_PORT]
+        command = command['-M', autossh_monitor_port]
     command = command['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
     proc = command.popen()
     save_process_pid(local, cmd, proc.pid)
-    # If we got something on autossh_err like: "channel_setup_fwd_listener_tcpip: cannot listen to port: 34925", we could try `fuser -k -n tcp 34925`
-    pipe_quote(cmd + '_out', proc.stdout)
-    pipe_quote(cmd + '_err', proc.stderr)
+    pipe_quote(local, cmd + '_out', proc.stdout)
+    pipe_quote(local, cmd + '_err', proc.stderr)
 
 def restart_on_change(exe_path):
     def run():
@@ -141,3 +141,17 @@ def get_num_cores(context):
         return context['wmic']['CPU', 'Get', 'NumberOfLogicalProcessors', '/Format:List']().strip().split('=')[-1]
     else:
         return context['getconf']['_NPROCESSORS_ONLN']().strip()
+
+def find_open_ports(contexts, num_ports):
+    if not num_ports:
+        return []
+    netstats = ' '.join([context['netstat']['-nal']() for context in contexts])
+    ports = []
+    random_ports = range(config.MIN_RANDOM_PORT, config.MAX_RANDOM_PORT + 1)
+    random.shuffle(random_ports)
+    for port in random_ports:
+        if not unicode(port) in netstats:
+            ports.append(port)
+        if len(ports) == num_ports:
+            return ports
+    raise Exception('Not enough available ports found')

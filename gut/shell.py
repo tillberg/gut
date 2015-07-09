@@ -95,6 +95,10 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 
         out(dim('Syncing ') + local._sync_path + dim(' with ') + remote._sync_path + '\n')
 
+        ports = util.find_open_ports([local, remote], 3)
+        # out(dim('Using ports ') + dim(', ').join([unicode(port) for port in ports]) +'\n')
+        gutd_bind_port, gutd_connect_port, autossh_monitor_port = ports
+
         ensure_build(local)
         ensure_build(remote)
 
@@ -102,16 +106,16 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         remote_tail_hash = get_tail_hash(remote, remote_path)
         tail_hash = None
 
-        util.start_ssh_tunnel(local, remote)
+        util.start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port)
 
         def cross_init(src_context, src_path, dest_context, dest_path):
-            gut.run_daemon(src_context, src_path, tail_hash)
+            gut.daemon(src_context, src_path, tail_hash, gutd_bind_port)
             gut.init(dest_context, dest_path)
             gut.setup_origin(dest_context, dest_path, tail_hash)
             import time
             time.sleep(2) # Give the gut-daemon and SSH tunnel a moment to start up
             gut.pull(dest_context, dest_path)
-            gut.run_daemon(dest_context, dest_path, tail_hash)
+            gut.daemon(dest_context, dest_path, tail_hash, gutd_bind_port)
 
         # Do we need to initialize local and/or remote gut repos?
         if not local_tail_hash or local_tail_hash != remote_tail_hash:
@@ -144,12 +148,12 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 shutdown()
         else:
             tail_hash = local_tail_hash
-            gut.run_daemon(local, local_path, tail_hash)
-            gut.run_daemon(remote, remote_path, tail_hash)
+            gut.daemon(local, local_path, tail_hash, gutd_bind_port)
+            gut.daemon(remote, remote_path, tail_hash, gutd_bind_port)
             # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
 
-        gut.setup_origin(local, local_path, tail_hash)
-        gut.setup_origin(remote, remote_path, tail_hash)
+        gut.setup_origin(local, local_path, tail_hash, gutd_connect_port)
+        gut.setup_origin(remote, remote_path, tail_hash, gutd_connect_port)
 
         def commit_and_update(src_system, changed_paths=None, update_untracked=False):
             if src_system == 'local':

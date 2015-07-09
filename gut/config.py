@@ -19,9 +19,8 @@ GUT_DIST_PATH = '/'.join([GUT_PATH, 'gut-build'])
 GUT_EXE_PATH = '/'.join([GUT_DIST_PATH, 'bin/gut'])
 GUT_DAEMON_PATH = '/'.join([GUT_PATH, 'repos'])
 
-GUTD_BIND_PORT = 34924
-GUTD_CONNECT_PORT = 34925
-AUTOSSH_MONITOR_PORT = 34927
+MIN_RANDOM_PORT = 34000
+MAX_RANDOM_PORT = 34999
 
 # Ignore files that are probably transient by default
 # You can add/remove additional globs to both the root .gutignore and to
