@@ -35,11 +35,14 @@ def commit(context, path, prefix, update_untracked=False):
     with context.cwd(context.path(path)):
         # start = datetime.now()
         head_before = rev_parse_head(context)
+        if update_untracked:
+            files_out = gut(context)['ls-files', '-i', '--exclude-standard', '--', prefix]().strip()
+            if files_out:
+                for filename in files_out.split('\n'):
+                    quote(context._name_ansi, dim('Untracking newly-.gutignored ') + filename)
+                    gut(context)['rm', '--cached', '--ignore-unmatch', '--quiet', '--', filename]()
         out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
-        # update_untracked is disabled on Windows due to #3
-        if update_untracked and not context._is_windows:
-            gut(context)['rm', '--cached', '-r', '--ignore-unmatch', '--quiet', prefix]()
-        gut(context)['add', '--all', prefix]()
+        gut(context)['add', '--all', '--', prefix]()
         commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
         head_after = rev_parse_head(context)
         made_a_commit = head_before != head_after

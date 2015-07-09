@@ -167,7 +167,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 
             # Based on the set of changed paths, figure out what we need to pass to `gut add` in order to capture everything
             if not changed_paths:
-                prefix = './'
+                prefix = '.'
             # This is kind of annoying because it regularly picks up .gutignored files, e.g. the ".#." files emacs drops:
             # elif len(changed_paths) == 1:
             #     (prefix,) = changed_paths
@@ -175,7 +175,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 # commonprefix operates on strings, not paths; so lop off the last bit of the path so that if we get two files within
                 # the same directory, e.g. "test/sarah" and "test/sally", we'll look in "test/" instead of in "test/sa".
                 separator = '\\' if src_context._is_windows else '/'
-                prefix = os.path.commonprefix(changed_paths).rpartition(separator)[0] or './'
+                prefix = os.path.commonprefix(changed_paths).rpartition(separator)[0] or '.'
             # out('system: %s\npaths: %s\ncommon prefix: %s\n' % (src_system, ' '.join(changed_paths) if changed_paths else '', prefix))
 
             try:
@@ -191,11 +191,8 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         # The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
         # commit_and_update calls below and the time that the filesystem watches are attached.
 
-        # Since update_untracked=True is too expensive here, if the user made offline changes to a .gutignore file, they'll
-        # to `touch` it while gut-sync is running in order to update the list of untracked files. A more sophisticated approach
-        # might be to peek at the terminal output of gut-commit and scan it for changes to .gutignore files.
-        commit_and_update('remote')
-        commit_and_update('local')
+        commit_and_update('remote', update_untracked=True)
+        commit_and_update('local', update_untracked=True)
         gut.pull(remote, remote_path)
         gut.pull(local, local_path)
 
