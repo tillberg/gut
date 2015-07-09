@@ -8,7 +8,7 @@ import time
 import traceback
 
 import plumbum
-import patch_plumbum; patch_plumbum.patch_darwin_stat()
+import patch_plumbum; patch_plumbum.patch()
 
 import config
 import terminal as term

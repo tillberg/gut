@@ -1,4 +1,4 @@
-def patch_darwin_stat():
+def patch():
     import plumbum
     from plumbum.commands import shquote
     from plumbum.path.remote import StatRes
@@ -21,6 +21,9 @@ def patch_darwin_stat():
         res = StatRes((int(statres[0], 16),) + tuple(int(sr) for sr in statres[1:]))
         res.text_mode = text_mode
         return res
+    def _path_link(self, src, dst, symlink):
+        self._session.run("ln %s %s %s" % ("-s" if symlink else "", shquote(src), shquote(dst)))
     plumbum.machines.remote.BaseRemoteMachine._path_getuid = _path_getuid
     plumbum.machines.remote.BaseRemoteMachine._path_getgid = _path_getgid
     plumbum.machines.remote.BaseRemoteMachine._path_stat = _path_stat
+    plumbum.machines.remote.BaseRemoteMachine._path_link = _path_link
