@@ -36,7 +36,8 @@ def commit(context, path, prefix, update_untracked=False):
         # start = datetime.now()
         head_before = rev_parse_head(context)
         out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
-        if update_untracked:
+        # update_untracked is disabled on Windows due to #3
+        if update_untracked and not context._is_windows:
             gut(context)['rm', '--cached', '-r', '--ignore-unmatch', '--quiet', prefix]()
         gut(context)['add', '--all', prefix]()
         commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
