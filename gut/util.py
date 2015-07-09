@@ -111,14 +111,18 @@ def restart_on_change(exe_path):
     def run():
         local = plumbum.local
         watch_path = os.path.dirname(os.path.abspath(__file__))
-        changed = append_inotify_change_events(local, local['inotifywait'])[local.path(watch_path)]() # blocks until there's a change
-        out_dim('\n(dev-mode) Restarting due to [%s]...\n' % (changed.strip(),))
-        while True:
-            try:
-                os.execv(unicode(exe_path), sys.argv)
-            except Exception as ex:
-                out('error restarting: %s\n' % (ex,))
-                time.sleep(1)
+        try:
+            changed = append_inotify_change_events(local, local['inotifywait'])['--quiet', '--recursive', '--', local.path(watch_path)]() # blocks until there's a change
+        except plumbum.commands.ProcessExecutionError as ex:
+            out(dim('(dev-mode) inotifywait exited with [') + unicode(ex,) + dim(']\n'))
+        else:
+            out_dim('\n(dev-mode) Restarting due to [%s]...\n' % (changed.strip(),))
+            while True:
+                try:
+                    os.execv(unicode(exe_path), sys.argv)
+                except Exception as ex:
+                    out('error restarting: %s\n' % (ex,))
+                    time.sleep(1)
     run_daemon_thread(run)
 
 def mkdirp(context, path):
