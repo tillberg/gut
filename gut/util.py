@@ -90,7 +90,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             else:
                 break
     run_daemon_thread(run)
-    pipe_quote('watch_%s_err' % (event_prefix,), proc.stderr)
+    pipe_quote(context, 'watch_%s_err' % (event_prefix,), proc.stderr)
 
 def start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port):
     cmd = get_cmd(local, ['autossh', 'ssh'])
@@ -113,8 +113,8 @@ def restart_on_change(exe_path):
         watch_path = os.path.dirname(os.path.abspath(__file__))
         try:
             changed = append_inotify_change_events(local, local['inotifywait'])['--quiet', '--recursive', '--', local.path(watch_path)]() # blocks until there's a change
-        except plumbum.commands.ProcessExecutionError as ex:
-            out(dim('(dev-mode) inotifywait exited with [') + unicode(ex,) + dim(']\n'))
+        except plumbum.commands.ProcessExecutionError:
+            out(dim('(dev-mode) inotifywait exited with non-zero status'))
         else:
             out_dim('\n(dev-mode) Restarting due to [%s]...\n' % (changed.strip(),))
             while True:

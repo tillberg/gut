@@ -21,15 +21,15 @@ def init(context, _sync_path):
     util.mkdirp(context, sync_path)
     with context.cwd(sync_path):
         if not (sync_path / '.gut').exists():
-            quote(context._name_ansi, gut(context)['init']())
+            quote(context, '', gut(context)['init']())
 
 def ensure_initial_commit(context, _sync_path):
     with context.cwd(sync_path):
         head = rev_parse_head(context)
         if head == 'HEAD':
             (sync_path / '.gutignore').write(config.DEFAULT_GUTIGNORE)
-            quote(context._name_ansi, gut(context)['add']['.gutignore']())
-            quote(context._name_ansi, gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
+            quote(context, '', gut(context)['add']['.gutignore']())
+            quote(context, '', gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
 
 def commit(context, path, prefix, update_untracked=False):
     with context.cwd(context.path(path)):
@@ -39,7 +39,7 @@ def commit(context, path, prefix, update_untracked=False):
             files_out = gut(context)['ls-files', '-i', '--exclude-standard', '--', prefix]().strip()
             if files_out:
                 for filename in files_out.split('\n'):
-                    quote(context._name_ansi, dim('Untracking newly-.gutignored ') + filename)
+                    quote(context, '', dim('Untracking newly-.gutignored ') + filename)
                     gut(context)['rm', '--cached', '--ignore-unmatch', '--quiet', '--', filename]()
         out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
         gut(context)['add', '--all', '--', prefix]()
@@ -48,8 +48,8 @@ def commit(context, path, prefix, update_untracked=False):
         made_a_commit = head_before != head_after
         out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + dim('.\n'))
         if made_a_commit:
-            quote(context._name_ansi, commit_out)
-        # quote(context, 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
+            quote(context, '', commit_out)
+        # quote(context, '', 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
         return made_a_commit
 
 def pull(context, path):
@@ -66,8 +66,8 @@ def pull(context, path):
                 out(color_error(' failed due to uncommitted changes.\n'))
             else:
                 out(dim(' done.\n'))
-            quote(context._name_ansi, stdout)
-            quote(context._name_ansi, stderr)
+            quote(context, '', stdout)
+            quote(context, '', stderr)
             return need_commit
     if do_merge():
         out(dim('Committing outstanding changes before retrying merge...\n'))

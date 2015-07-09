@@ -52,14 +52,14 @@ def kill_previous_process(context, process_name):
                 return
             command = context['kill']['-f', pid]
         _, stdout, stderr = command.run(retcode=None)
-        quote(context._name_ansi, stdout)
-        quote(context._name_ansi, stderr)
+        quote(context, '', stdout)
+        quote(context, '', stderr)
 
 def save_process_pid(context, process_name, pid):
     my_path = get_pidfile_path(context, process_name)
     if not pid:
         # --newest is not supported in Darwin; -n work in both Darwin and Linux, though
-        pid = context['pgrep']['-n', process_name]().strip()
+        pid = context['pgrep']['-n', process_name](retcode=None).strip()
         if pid:
             out(dim('Using PID of ') + pid + dim(' (from `pgrep -n ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name_ansi + dim('.\n'))
     if pid:
@@ -161,24 +161,33 @@ def out(text):
 def out_dim(text):
     out(dim(text))
 
-def quote(name, text):
+def get_nameish(context, name):
+    return context._name_ansi + (':' + name if name else '')
+
+def check_text_for_errors(context, line):
+    if 'Please increase the amount of inotify watches allowed per user' in line:
+        out('''
+(@error)You've hit the inotify max_user_watches limit on(@r) %s.
+'''.lstrip() % (context._name_ansi,))
+
+def quote(context, name, text):
+    nameish = get_nameish(context, name)
     for line in text.strip().split('\n'):
         # Avoid outputting lines that only contain control characters and whitespace
         if RE_ANSI.sub('', line).strip():
-            out(dim('[') + name + dim('] ') + line + '\n')
+            out(dim('[') + nameish + dim('] ') + line + '\n')
+    check_text_for_errors(context, line)
 
-def pipe_quote(name, stream, announce_exit=True):
+def pipe_quote(context, name, stream, announce_exit=True):
     def run():
         try:
             while not shutting_down():
                 line = stream.readline()
                 if line != '' and not shutting_down():
-                    out('[%s] %s' % (name, line))
+                    quote(context, name, line)
                 else:
                     break
         except Exception:
             if not shutting_down():
                 raise
-        if announce_exit and not shutting_down():
-            out('%s exited.\n' % (name,))
     run_daemon_thread(run)
