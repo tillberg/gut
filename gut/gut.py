@@ -77,8 +77,7 @@ def setup_origin(context, path):
         gut(context)['remote', 'rm', 'origin'](retcode=None)
         gut(context)['remote', 'add', 'origin', 'gut://localhost:%s/' % (config.GUTD_CONNECT_PORT,)]()
         gut(context)['config', 'color.ui', 'always']()
-        gut(context)['config', 'core.ignoreStat', '1']()
-        hostname = context['hostname']()
+        hostname = context['hostname']().strip()
         gut(context)['config', 'user.name', hostname]()
         gut(context)['config', 'user.email', 'gut-sync@' + hostname]()
 

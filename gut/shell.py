@@ -230,11 +230,11 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 def main():
     action = len(sys.argv) >= 2 and sys.argv[1]
     if action in config.ALL_GUT_COMMANDS:
-        gut_exe_path = gut.exe_path(plumbum.local)
+        local = plumbum.local
+        init_context(local)
+        gut_exe_path = gut.exe_path(local)
         # Build gut if needed
         if not plumbum.local.path(config.GUT_EXE_PATH).exists():
-            local = plumbum.local
-            init_context(local)
             ensure_build(local)
         os.execv(unicode(gut_exe_path), [unicode(gut_exe_path)] + sys.argv[1:])
     else:
