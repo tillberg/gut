@@ -111,7 +111,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         def cross_init(src_context, src_path, dest_context, dest_path):
             gut.daemon(src_context, src_path, tail_hash, gutd_bind_port)
             gut.init(dest_context, dest_path)
-            gut.setup_origin(dest_context, dest_path, tail_hash)
+            gut.setup_origin(dest_context, dest_path, tail_hash, gutd_connect_port)
             import time
             time.sleep(2) # Give the gut-daemon and SSH tunnel a moment to start up
             gut.pull(dest_context, dest_path)
