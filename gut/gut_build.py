@@ -7,7 +7,7 @@ import plumbum
 
 import config
 import deps
-from terminal import out, out_dim, dim, color_path
+from terminal import out, out_dim, dim, color_path, Writer
 import util
 
 def ensure_gut_folders(context):
@@ -131,21 +131,24 @@ def build(context, _build_path):
     install_prefix = 'prefix=%s' % (windows_path_to_mingw_path(gut_dist_path) if context._is_windows else gut_dist_path,)
     with context.cwd(build_path):
         def build():
+            status = Writer(context)
+            log = Writer(context, 'make')
             def make(args):
                 if context._is_windows:
                     make_path = windows_path_to_mingw_path(context.path(config.MSYSGIT_PATH) / 'bin/make.exe')
                     context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin NO_GETTEXT=1 ' + ' '.join([make_path] + args))]()
                 else:
-                    context['make'][args]()
+                    # context['make'][args]()
+                    log.quote(context['make'][args].popen())
             if not context._is_windows:
-                out(dim('Configuring Makefile for gut...'))
+                status.out(dim('Configuring Makefile for gut...'))
                 make([install_prefix, 'configure'])
                 context[build_path / 'configure'][install_prefix]()
-                out(dim(' done.\n'))
+                status.out(dim(' done.\n'))
             parallelism = util.get_num_cores(context)
-            out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
+            status.out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
             make([install_prefix, '-j', parallelism])
-            out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
+            status.out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
             make([install_prefix, 'install'])
-            out(dim(' done.\n'))
+            status.out(dim(' done.\n'))
         deps.retry_method(context, build)

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import config
-from terminal import out, out_dim, dim, quote, color_commit, color_error, pipe_quote, kill_previous_process, active_pidfiles, get_pidfile_path
+from terminal import out, out_dim, dim, quote, color_commit, color_error, kill_previous_process, active_pidfiles, get_pidfile_path, Writer
 import util
 
 def exe_path(context):
@@ -101,5 +101,4 @@ def daemon(context, path, tail_hash, gutd_bind_port=None):
     pidfile_opt = '--pid-file=%s' % (get_pidfile_path(context, 'gut-daemon'),)
     proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (base_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (gutd_bind_port,), base_path].popen()
     active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
-    pipe_quote(context, 'daemon_out', proc.stdout)
-    pipe_quote(context, 'daemon_err', proc.stderr)
+    Writer(context, 'gut-daemon').quote(proc, wait=False)

@@ -7,7 +7,7 @@ import plumbum
 
 import config
 import deps
-from terminal import out, out_dim, dim, pipe_quote, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread, get_cmd
+from terminal import out, out_dim, dim, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread, get_cmd
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
@@ -90,7 +90,7 @@ def watch_for_changes(context, path, event_prefix, event_queue):
             else:
                 break
     run_daemon_thread(run)
-    pipe_quote(context, 'watch_%s_err' % (event_prefix,), proc.stderr)
+    Writer(context, 'watch_%s' % (event_prefix,)).quote(proc.stderr)
 
 def start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port):
     cmd = get_cmd(local, ['autossh', 'ssh'])
@@ -104,8 +104,7 @@ def start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_m
     command = command['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
     proc = command.popen()
     save_process_pid(local, cmd, proc.pid)
-    pipe_quote(local, cmd + '_out', proc.stdout)
-    pipe_quote(local, cmd + '_err', proc.stderr)
+    Writer(local, cmd + '_out').quote(proc, wait=False)
 
 def restart_on_change(exe_path):
     def run():

@@ -177,49 +177,130 @@ def ansi_mark_replacer(matchobj):
         # Don't filter unrecognized text
         return '(@' + code + ')'
 
-def out(text):
-    text = RE_ANSI_MARK.sub(ansi_mark_replacer, text) + ANSI_RESET_ALL
-    if no_color:
-        text = RE_ANSI.sub('', text)
-    sys.stderr.write(text)
-    sys.stderr.flush()
+def uncolorize(text):
+    return RE_ANSI.sub('', RE_ANSI_MARK.sub('', text))
 
-def out_dim(text):
-    out(dim(text))
+def colorize(text):
+    return uncolorize(text) if no_color else RE_ANSI_MARK.sub(ansi_mark_replacer, text)
+
+def has_visible_text(text):
+    return uncolorize(text).strip() != ''
 
 def get_nameish(context, name):
-    return context._name_ansi + (':' + name if name else '')
+    return (context._name_ansi + (':' + name if name else '')) if context else '--'
 
-def check_text_for_errors(context, line):
-    if 'Please increase the amount of inotify watches allowed per user' in line:
-        out('(@error) *** You\'ve hit the inotify max_user_watches limit on (@r)%s(@error).\n' % (context._name_ansi,))
-        current_limit = context.path('/proc/sys/fs/inotify/max_user_watches').read().strip()
-        if current_limit:
-            out('(@error) *** The current limit (from /proc/sys/fs/inotify/max_user_watches) is (@r)%s(@error).\n' % (current_limit,))
-        if context._is_linux:
-            out('(@error) *** To increase this limit, something like this might work:\n')
-            out('(@error) *** echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p\n')
-            out('(@error) *** Alternatively, you could also try reducing the total number of directories in your\n')
-            out('(@error) *** gut repo by moving unused files to another folder.\n')
+writers = []
+last_temp_output = ''
+
+stderr_lock = threading.RLock()
+
+def clear_temp_output():
+    global last_temp_output
+    if last_temp_output:
+        # sys.stderr.write('Clear %s characters\n' % len(last_temp_output))
+        sys.stderr.write('\b \b' * len(last_temp_output))
+        last_temp_output = ''
+
+def update_temp_output():
+    clear_temp_output()
+    global last_temp_output
+    curr_lines = [writer.get_curr_line() for writer in writers]
+    # sys.stderr.write('lines: %s\n' % (curr_lines,))
+    curr_lines = [line for line in curr_lines if line]
+    last_temp_output = 'tmp: ' + colorize(' | '.join(curr_lines))
+    MAX_LEN = 100
+    if len(last_temp_output) > MAX_LEN:
+        last_temp_output = last_temp_output[:MAX_LEN - 4] + ' ...'
+    if last_temp_output:
+        sys.stderr.write(last_temp_output)
+
+class Writer:
+    def __init__(self, context, name=None):
+        self.context = context
+        self.name = name
+        self.prefix = '(@dim)[(@r)%s(@dim)](@r) ' % (get_nameish(context, name),)
+        self.curr_line = ''
+        writers.append(self)
+
+    def __call__(self, text):
+        self.out(text)
+
+    # def __del__(self):
+    #     if self.curr_line:
+    #         self.out(' ENDLINE\n')
+
+    def get_curr_line(self):
+        return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
+
+    def out(self, text):
+        with stderr_lock:
+            text = self.curr_line + text
+            while True:
+                line, sep, text = text.partition('\n')
+                # sys.stderr.write('%s\n' % ((line, sep, text),))
+                if sep:
+                    clear_temp_output()
+                    # Avoid outputting lines that only contain control characters and whitespace
+                    if has_visible_text(line):
+                        sys.stderr.write(colorize(self.prefix + line) + sep)
+                        # check_text_for_errors(context, line)
+                else:
+                    text = line
+                    break
+            self.curr_line = text
+            update_temp_output()
+            sys.stderr.flush()
+
+    def check_text_for_errors(self, line):
+        if 'Please increase the amount of inotify watches allowed per user' in line:
+            out('(@error) *** You\'ve hit the inotify max_user_watches limit on (@r)%s(@error).\n' % (context._name_ansi,))
+            current_limit = context.path('/proc/sys/fs/inotify/max_user_watches').read().strip()
+            if current_limit:
+                out('(@error) *** The current limit (from /proc/sys/fs/inotify/max_user_watches) is (@r)%s(@error).\n' % (current_limit,))
+            if context._is_linux:
+                out('(@error) *** To increase this limit, something like this might work:\n')
+                out('(@error) *** echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p\n')
+                out('(@error) *** Alternatively, you could also try reducing the total number of directories in your\n')
+                out('(@error) *** gut repo by moving unused files to another folder.\n')
+
+    def quote_fd(self, fd):
+        def run():
+            try:
+                while not shutting_down():
+                    text = fd.read(1)
+                    if text != '' and not shutting_down():
+                        self.out(text)
+                    else:
+                        break
+            except Exception:
+                if not shutting_down():
+                    raise
+        run_daemon_thread(run)
+
+    def quote_proc(self, proc, wait=True):
+        self.quote_fd(proc.stdout)
+        self.quote_fd(proc.stderr)
+        if wait:
+            proc.wait()
+
+    def quote(self, thing, wait=True):
+        if isinstance(thing, (unicode, str)):
+            self.out(thing)
+        elif hasattr(thing, 'stdout') and hasattr(thing, 'wait'):
+            self.quote_proc(thing, wait=wait)
+        elif hasattr(thing, 'read'):
+            self.quote_fd(thing)
+        else:
+            raise Exception('terminal.Writer.quote doesn\'t know what to do with %s' % (thing,))
+
+
+default_writer = Writer(None)
+
+def out(text):
+    default_writer.out(text)
+
+def out_dim(text):
+    default_writer.out(dim(text))
 
 def quote(context, name, text):
-    nameish = get_nameish(context, name)
-    for line in text.strip().split('\n'):
-        # Avoid outputting lines that only contain control characters and whitespace
-        if RE_ANSI.sub('', line).strip():
-            out(dim('[') + nameish + dim('] ') + line + '\n')
-    check_text_for_errors(context, line)
-
-def pipe_quote(context, name, stream, announce_exit=True):
-    def run():
-        try:
-            while not shutting_down():
-                line = stream.readline()
-                if line != '' and not shutting_down():
-                    quote(context, name, line)
-                else:
-                    break
-        except Exception:
-            if not shutting_down():
-                raise
-    run_daemon_thread(run)
+    Writer(context, name).out(text)
