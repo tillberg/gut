@@ -248,6 +248,11 @@ def main():
         init_context(local)
         parser = argparse.ArgumentParser()
         parser.add_argument('action', choices=['build', 'sync'])
+        parser.add_argument('--version', action='store_true')
+        if parser.parse_args().version:
+            import pkg_resources
+            out('gut-sync version %s\n' % (pkg_resources.require("gut")[0].version,))
+            return
         parser.add_argument('--install-deps', action='store_true')
         parser.add_argument('--no-color', action='store_true')
         def parse_args():
@@ -267,7 +272,7 @@ def main():
             parser.add_argument('--identity', '-i')
             parser.add_argument('--dev', action='store_true')
             # parser.add_argument('--verbose', '-v', action='count')
-            args = parse_args()
+            args = parser.parse_args()
             local_path = args.local
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
