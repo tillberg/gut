@@ -133,22 +133,22 @@ def build(context, _build_path):
         def build():
             status = Writer(context)
             log = Writer(context, 'make')
-            def make(args):
+            def make(name, args):
                 if context._is_windows:
                     make_path = windows_path_to_mingw_path(context.path(config.MSYSGIT_PATH) / 'bin/make.exe')
                     context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin NO_GETTEXT=1 ' + ' '.join([make_path] + args))]()
                 else:
                     # context['make'][args]()
-                    log.quote(context['make'][args].popen())
+                    Writer(context, 'make_' + name).quote(context['make'][args].popen())
             if not context._is_windows:
                 status.out(dim('Configuring Makefile for gut...'))
-                make([install_prefix, 'configure'])
+                make('configure', [install_prefix, 'configure'])
                 context[build_path / 'configure'][install_prefix]()
                 status.out(dim(' done.\n'))
             parallelism = util.get_num_cores(context)
             status.out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
-            make([install_prefix, '-j', parallelism])
+            make('build', [install_prefix, '-j', parallelism])
             status.out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
-            make([install_prefix, 'install'])
+            make('install', [install_prefix, 'install'])
             status.out(dim(' done.\n'))
         deps.retry_method(context, build)

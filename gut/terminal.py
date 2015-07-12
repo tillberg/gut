@@ -193,26 +193,40 @@ writers = []
 last_temp_output = ''
 
 stderr_lock = threading.RLock()
+tmp_out_lock = threading.RLock()
+
+def to_stderr(s):
+    with stderr_lock:
+        sys.stderr.write(s)
+
+_terminal_columns = None
+def get_terminal_cols():
+    global _terminal_columns
+    if _terminal_columns == None:
+        _, _terminal_columns = plumbum.local['stty']['size'](stdin=None).strip().split()
+    return _terminal_columns
 
 def clear_temp_output():
-    global last_temp_output
-    if last_temp_output:
-        # sys.stderr.write('Clear %s characters\n' % len(last_temp_output))
-        sys.stderr.write('\b \b' * len(last_temp_output))
-        last_temp_output = ''
+    with tmp_out_lock:
+        global last_temp_output
+        if last_temp_output:
+            to_stderr('Clear %s characters\n' % len(last_temp_output))
+            # sys.stderr.write('\b \b' * len(last_temp_output))
+            last_temp_output = ''
 
 def update_temp_output():
-    clear_temp_output()
-    global last_temp_output
-    curr_lines = [writer.get_curr_line() for writer in writers]
-    # sys.stderr.write('lines: %s\n' % (curr_lines,))
-    curr_lines = [line for line in curr_lines if line]
-    last_temp_output = 'tmp: ' + colorize(' | '.join(curr_lines))
-    MAX_LEN = 100
-    if len(last_temp_output) > MAX_LEN:
-        last_temp_output = last_temp_output[:MAX_LEN - 4] + ' ...'
-    if last_temp_output:
-        sys.stderr.write(last_temp_output)
+    with tmp_out_lock:
+        clear_temp_output()
+        global last_temp_output
+        curr_lines = [writer.get_curr_line() for writer in writers]
+        # sys.stderr.write('lines: %s\n' % (curr_lines,))
+        curr_lines = [line for line in curr_lines if line]
+        last_temp_output = 'tmp: ' + colorize(' | '.join(curr_lines))
+        max_len = get_terminal_cols()
+        if len(last_temp_output) > max_len:
+            last_temp_output = last_temp_output[:max_len - 4] + ' ...'
+        if last_temp_output:
+            to_stderr(last_temp_output + '\n')
 
 class Writer:
     def __init__(self, context, name=None):
@@ -220,6 +234,7 @@ class Writer:
         self.name = name
         self.prefix = '(@dim)[(@r)%s(@dim)](@r) ' % (get_nameish(context, name),)
         self.curr_line = ''
+        self.out_lock = threading.RLock()
         writers.append(self)
 
     def __call__(self, text):
@@ -230,26 +245,27 @@ class Writer:
     #         self.out(' ENDLINE\n')
 
     def get_curr_line(self):
-        return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
+        with self.out_lock:
+            return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
 
     def out(self, text):
-        with stderr_lock:
+        with self.out_lock:
             text = self.curr_line + text
             while True:
                 line, sep, text = text.partition('\n')
                 # sys.stderr.write('%s\n' % ((line, sep, text),))
                 if sep:
-                    clear_temp_output()
                     # Avoid outputting lines that only contain control characters and whitespace
                     if has_visible_text(line):
-                        sys.stderr.write(colorize(self.prefix + line) + sep)
+                        clear_temp_output()
+                        to_stderr(colorize(self.prefix + line) + sep)
                         # check_text_for_errors(context, line)
                 else:
                     text = line
                     break
             self.curr_line = text
-            update_temp_output()
-            sys.stderr.flush()
+        update_temp_output()
+        sys.stderr.flush()
 
     def check_text_for_errors(self, line):
         if 'Please increase the amount of inotify watches allowed per user' in line:
@@ -265,15 +281,22 @@ class Writer:
 
     def quote_fd(self, fd):
         def run():
+            # import fcntl
+            # make stdin a non-blocking file
+            # fn = fd.fileno()
+            # fl = fcntl.fcntl(fn, fcntl.F_GETFL)
+            # fcntl.fcntl(fn, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
             try:
-                while not shutting_down():
-                    text = fd.read(1)
+                while True:
+                    text = fd.readline()
                     if text != '' and not shutting_down():
-                        self.out(text)
+                        self.out(text + '\n')
                     else:
                         break
-            except Exception:
+            except Exception as ex:
                 if not shutting_down():
+                    # self.out(str(ex))
                     raise
         run_daemon_thread(run)
 
