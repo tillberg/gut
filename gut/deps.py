@@ -67,27 +67,33 @@ def divine_missing_dependency(exception_text):
             return name
     return None
 
+
 def retry_method(context, cb):
     missing_dep_name = None
     last_missing_dep_name = None
+    def output_failed():
+        if missing_dep_name:
+            out(color_error(' failed (missing ') + missing_dep_name + color_error(')') + dim('.\n\n'))
+        else:
+            out(color_error(' failed') + dim('.\n\n'))
+        traceback.print_exc(file=sys.stderr)
     while True:
         try:
             rval = cb()
+        except KeyboardInterrupt:
+            shutdown()
         except plumbum.commands.processes.ProcessExecutionError as ex:
             missing_dep_name = divine_missing_dependency(ex.stdout + ex.stderr)
+            output_failed()
         except Exception as ex:
-            missing_dep_name = divine_missing_dependency(ex.message)
+            missing_dep_name = divine_missing_dependency(str(ex))
+            output_failed()
         else:
             break
         if missing_dep_name:
-            out(color_error(' failed (missing ') + missing_dep_name + color_error(')') + dim('.\n\n'))
-            traceback.print_exc(file=sys.stderr)
             missing_dependency(context, missing_dep_name, retry_failed=(missing_dep_name == last_missing_dep_name))
             out_dim('Retrying...\n')
             last_missing_dep_name = missing_dep_name
         else:
-            out(color_error(' failed') + dim('.\n\n'))
-            traceback.print_exc(file=sys.stderr)
             shutdown()
     return rval
-

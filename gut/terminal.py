@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import sys
@@ -91,6 +92,7 @@ def shutdown(exit=True):
     with _shutting_down_lock:
         _shutting_down = True
     try:
+        get_event_loop().stop()
         # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
             out(dim('\nShutting down ') + process_name + dim(' on ') + context._name_ansi + dim('...'))
@@ -206,30 +208,44 @@ def get_terminal_cols():
     return int(_terminal_columns)
 
 def clear_temp_output():
+    global last_temp_output
     with lock:
-        global last_temp_output
         if last_temp_output:
-            to_stderr('Clear %s characters\n' % len(last_temp_output))
-            # sys.stderr.write('\b \b' * len(last_temp_output))
+            # to_stderr('Clear %s characters\n' % len(last_temp_output))
+            to_stderr('\b \b' * len(last_temp_output))
             last_temp_output = ''
 
 def update_temp_output():
+    global last_temp_output
     with lock:
-        global last_temp_output
         curr_lines = [writer.get_curr_line() for writer in writers]
         # sys.stderr.write('lines: %s\n' % (curr_lines,))
         curr_lines = [line for line in curr_lines if line]
         clear_temp_output()
-        temp_output = 'tmp: ' + colorize(' | '.join(curr_lines))
+        temp_output = colorize(' | '.join(curr_lines))
+        if temp_output:
+            temp_output = colorize(dim('... ')) + temp_output
         if temp_output == last_temp_output:
             return
         clear_temp_output()
         max_len = get_terminal_cols()
+        # XXX this doesn't take into account control characters yet
         if len(temp_output) > max_len:
             temp_output = temp_output[:max_len - 4] + ' ...'
         if temp_output:
-            to_stderr(temp_output + '\n')
+            to_stderr(temp_output)
         last_temp_output = temp_output
+
+_event_loop = None
+def get_event_loop():
+    global _event_loop
+    if not _event_loop:
+        _event_loop = asyncio.get_event_loop()
+        def run():
+            asyncio.set_event_loop(_event_loop)
+            _event_loop.run_forever()
+        run_daemon_thread(run)
+    return _event_loop
 
 class Writer:
     def __init__(self, context, name=None):
@@ -282,25 +298,26 @@ class Writer:
                 out('(@error) *** gut repo by moving unused files to another folder.\n')
 
     def quote_fd(self, fd):
-        def run():
-            # import fcntl
-            # make stdin a non-blocking file
-            # fn = fd.fileno()
-            # fl = fcntl.fcntl(fn, fcntl.F_GETFL)
-            # fcntl.fcntl(fn, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
+        @asyncio.coroutine
+        def run(loop):
             try:
+                reader = asyncio.StreamReader()
+                reader_protocol = asyncio.StreamReaderProtocol(reader)
+                yield from loop.connect_read_pipe(lambda: reader_protocol, fd)
                 while True:
-                    text = fd.readline()
+                    text = yield from reader.read(1)
                     if text and not shutting_down():
-                        self.out(text.decode() + '\n')
+                        self.out(text.decode())
                     else:
                         break
+                out('\n')
             except Exception as ex:
                 if not shutting_down():
-                    # self.out(str(ex))
                     raise
-        run_daemon_thread(run)
+        loop = get_event_loop()
+        def queue_task():
+            loop.create_task(run(loop))
+        loop.call_soon_threadsafe(queue_task)
 
     def quote_proc(self, proc, wait=True):
         self.quote_fd(proc.stdout)

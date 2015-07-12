@@ -139,7 +139,7 @@ def build(context, _build_path):
                     context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin NO_GETTEXT=1 ' + ' '.join([make_path] + args))]()
                 else:
                     # context['make'][args]()
-                    Writer(context, 'make_' + name).quote(context['make'][args].popen())
+                    Writer(context, dim('make_' + name)).quote(context['make'][args].popen())
             if not context._is_windows:
                 status.out(dim('Configuring Makefile for gut...'))
                 make('configure', [install_prefix, 'configure'])
