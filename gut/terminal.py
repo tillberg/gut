@@ -12,7 +12,7 @@ else:
     colorama.init()
 import plumbum
 
-import config
+from . import config
 
 GUT_HASH_DISPLAY_CHARS = 10
 
@@ -144,13 +144,13 @@ def color_commit(commitish):
     return '(@commit)%s(@r)' % (commitish or 'None')[:GUT_HASH_DISPLAY_CHARS]
 
 def dim(text):
-    return '(@dim)' + unicode(text) + '(@r)'
+    return '(@dim)' + str(text) + '(@r)'
 
 def bright(text):
-    return '(@bright)' + unicode(text) + '(@r)'
+    return '(@bright)' + str(text) + '(@r)'
 
 def color_host_path(context, path):
-    return (context._name_ansi + dim(':') if not context._is_local else '') + '(@path)' + unicode(context.path(path)) + '(@r)'
+    return (context._name_ansi + dim(':') if not context._is_local else '') + '(@path)' + str(context.path(path)) + '(@r)'
 
 no_color = False
 def disable_color():
@@ -192,11 +192,10 @@ def get_nameish(context, name):
 writers = []
 last_temp_output = ''
 
-stderr_lock = threading.RLock()
-tmp_out_lock = threading.RLock()
+lock = threading.RLock()
 
 def to_stderr(s):
-    with stderr_lock:
+    with lock:
         sys.stderr.write(s)
 
 _terminal_columns = None
@@ -204,10 +203,10 @@ def get_terminal_cols():
     global _terminal_columns
     if _terminal_columns == None:
         _, _terminal_columns = plumbum.local['stty']['size'](stdin=None).strip().split()
-    return _terminal_columns
+    return int(_terminal_columns)
 
 def clear_temp_output():
-    with tmp_out_lock:
+    with lock:
         global last_temp_output
         if last_temp_output:
             to_stderr('Clear %s characters\n' % len(last_temp_output))
@@ -215,18 +214,22 @@ def clear_temp_output():
             last_temp_output = ''
 
 def update_temp_output():
-    with tmp_out_lock:
-        clear_temp_output()
+    with lock:
         global last_temp_output
         curr_lines = [writer.get_curr_line() for writer in writers]
         # sys.stderr.write('lines: %s\n' % (curr_lines,))
         curr_lines = [line for line in curr_lines if line]
-        last_temp_output = 'tmp: ' + colorize(' | '.join(curr_lines))
+        clear_temp_output()
+        temp_output = 'tmp: ' + colorize(' | '.join(curr_lines))
+        if temp_output == last_temp_output:
+            return
+        clear_temp_output()
         max_len = get_terminal_cols()
-        if len(last_temp_output) > max_len:
-            last_temp_output = last_temp_output[:max_len - 4] + ' ...'
-        if last_temp_output:
-            to_stderr(last_temp_output + '\n')
+        if len(temp_output) > max_len:
+            temp_output = temp_output[:max_len - 4] + ' ...'
+        if temp_output:
+            to_stderr(temp_output + '\n')
+        last_temp_output = temp_output
 
 class Writer:
     def __init__(self, context, name=None):
@@ -234,22 +237,21 @@ class Writer:
         self.name = name
         self.prefix = '(@dim)[(@r)%s(@dim)](@r) ' % (get_nameish(context, name),)
         self.curr_line = ''
-        self.out_lock = threading.RLock()
         writers.append(self)
 
-    def __call__(self, text):
-        self.out(text)
+    # def __call__(self, text):
+    #     self.out(text)
 
     # def __del__(self):
     #     if self.curr_line:
     #         self.out(' ENDLINE\n')
 
     def get_curr_line(self):
-        with self.out_lock:
+        with lock:
             return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
 
     def out(self, text):
-        with self.out_lock:
+        with lock:
             text = self.curr_line + text
             while True:
                 line, sep, text = text.partition('\n')
@@ -290,8 +292,8 @@ class Writer:
             try:
                 while True:
                     text = fd.readline()
-                    if text != '' and not shutting_down():
-                        self.out(text + '\n')
+                    if text and not shutting_down():
+                        self.out(text.decode() + '\n')
                     else:
                         break
             except Exception as ex:
@@ -307,7 +309,7 @@ class Writer:
             proc.wait()
 
     def quote(self, thing, wait=True):
-        if isinstance(thing, (unicode, str)):
+        if isinstance(thing, str):
             self.out(thing)
         elif hasattr(thing, 'stdout') and hasattr(thing, 'wait'):
             self.quote_proc(thing, wait=wait)

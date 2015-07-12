@@ -5,9 +5,9 @@ import time
 
 import plumbum
 
-import config
-import deps
-from terminal import out, out_dim, dim, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread, get_cmd
+from . import config
+from . import deps
+from .terminal import out, out_dim, dim, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread, get_cmd
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
@@ -17,7 +17,7 @@ def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     out(dim('Uploading ') + color_host_path(src_context, src_path) + dim(' to ') + color_host_path(dest_context, dest_path) + dim('...'))
     mkdirp(dest_context, dest_path)
     if src_context._is_windows:
-        root_path = os.path.normpath(os.path.expanduser(unicode(src_path)))
+        root_path = os.path.normpath(os.path.expanduser(str(src_path)))
         for root, folders, files in os.walk(root_path):
             dest_folder = dest_context.path(dest_path) / os.path.relpath(root, root_path).replace('\\', '/')
             mkdirp(dest_context, dest_folder)
@@ -118,7 +118,7 @@ def restart_on_change(exe_path):
             out_dim('\n(dev-mode) Restarting due to [%s]...\n' % (changed.strip(),))
             while True:
                 try:
-                    os.execv(unicode(exe_path), sys.argv)
+                    os.execv(str(exe_path), sys.argv)
                 except Exception as ex:
                     out('error restarting: %s\n' % (ex,))
                     time.sleep(1)
@@ -127,7 +127,7 @@ def restart_on_change(exe_path):
 def mkdirp(context, path):
     if context._is_windows:
         if context._is_local:
-            _path = os.path.normpath(os.path.expanduser(unicode(path)))
+            _path = os.path.normpath(os.path.expanduser(str(path)))
             if not os.path.exists(_path):
                 os.makedirs(_path)
         else:
@@ -146,10 +146,10 @@ def find_open_ports(contexts, num_ports):
         return []
     netstats = ' '.join([context['netstat']['-an' if context._is_windows else '-anl']() for context in contexts])
     ports = []
-    random_ports = range(config.MIN_RANDOM_PORT, config.MAX_RANDOM_PORT + 1)
+    random_ports = list(range(config.MIN_RANDOM_PORT, config.MAX_RANDOM_PORT + 1))
     random.shuffle(random_ports)
     for port in random_ports:
-        if not unicode(port) in netstats:
+        if not str(port) in netstats:
             ports.append(port)
         if len(ports) == num_ports:
             return ports

@@ -2,25 +2,25 @@
 
 import argparse
 import os
-import Queue
+from queue import Queue
 import sys
 import time
 import traceback
 
 import plumbum
-import patch_plumbum; patch_plumbum.patch()
+from . import patch_plumbum; patch_plumbum.patch()
 
-import config
-import terminal as term
-from terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit, run_daemon_thread
-import deps
-import gut
-import gut_build
-import util
+from . import config
+from . import terminal as term
+from .terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit, run_daemon_thread
+from . import deps
+from . import gut_cmd
+from . import gut_build
+from . import util
 
 def ensure_build(context):
     desired_git_version = config.GIT_WIN_VERSION if context._is_windows else config.GIT_VERSION
-    if not gut.exe_path(context).exists() or desired_git_version.lstrip('v') not in gut.get_version(context):
+    if not gut_cmd.exe_path(context).exists() or desired_git_version.lstrip('v') not in gut_cmd.get_version(context):
         out(dim('Need to build gut on ') + context._name_ansi + dim('.\n'))
         gut_build.ensure_gut_folders(context)
         gut_build.prepare(context)
@@ -47,7 +47,7 @@ def get_tail_hash(context, sync_path):
     path = context.path(sync_path)
     if (path / '.gut').exists():
         with context.cwd(path):
-            return gut.gut(context)['rev-list', '--max-parents=0', 'HEAD'](retcode=None).strip() or None
+            return gut_cmd.gut(context)['rev-list', '--max-parents=0', 'HEAD'](retcode=None).strip() or None
     return None
 
 def assert_folder_empty(context, _path):
@@ -109,13 +109,13 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
         util.start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port)
 
         def cross_init(src_context, src_path, dest_context, dest_path):
-            gut.daemon(src_context, src_path, tail_hash, gutd_bind_port)
-            gut.init(dest_context, dest_path)
-            gut.setup_origin(dest_context, dest_path, tail_hash, gutd_connect_port)
+            gut_cmd.daemon(src_context, src_path, tail_hash, gutd_bind_port)
+            gut_cmd.init(dest_context, dest_path)
+            gut_cmd.setup_origin(dest_context, dest_path, tail_hash, gutd_connect_port)
             import time
             time.sleep(2) # Give the gut-daemon and SSH tunnel a moment to start up
-            gut.pull(dest_context, dest_path)
-            gut.daemon(dest_context, dest_path, tail_hash, gutd_bind_port)
+            gut_cmd.pull(dest_context, dest_path)
+            gut_cmd.daemon(dest_context, dest_path, tail_hash, gutd_bind_port)
 
         # Do we need to initialize local and/or remote gut repos?
         if not local_tail_hash or local_tail_hash != remote_tail_hash:
@@ -136,8 +136,8 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 assert_folder_empty(local, local_path)
                 out_dim('Initializing both local and remote gut repos...\n')
                 out_dim('Initializing local repo first...\n')
-                gut.init(local, local_path)
-                gut.ensure_initial_commit(local, local_path)
+                gut_cmd.init(local, local_path)
+                gut_cmd.ensure_initial_commit(local, local_path)
                 tail_hash = get_tail_hash(local, local_path)
                 out_dim('Initializing remote repo from local repo...\n')
                 cross_init(local, local_path, remote, remote_path)
@@ -148,12 +148,12 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 shutdown()
         else:
             tail_hash = local_tail_hash
-            gut.daemon(local, local_path, tail_hash, gutd_bind_port)
-            gut.daemon(remote, remote_path, tail_hash, gutd_bind_port)
+            gut_cmd.daemon(local, local_path, tail_hash, gutd_bind_port)
+            gut_cmd.daemon(remote, remote_path, tail_hash, gutd_bind_port)
             # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
 
-        gut.setup_origin(local, local_path, tail_hash, gutd_connect_port)
-        gut.setup_origin(remote, remote_path, tail_hash, gutd_connect_port)
+        gut_cmd.setup_origin(local, local_path, tail_hash, gutd_connect_port)
+        gut_cmd.setup_origin(remote, remote_path, tail_hash, gutd_connect_port)
 
         def commit_and_update(src_system, changed_paths=None, update_untracked=False):
             if src_system == 'local':
@@ -183,8 +183,8 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
             # out('system: %s\npaths: %s\ncommon prefix: %s\n' % (src_system, ' '.join(changed_paths) if changed_paths else '', prefix))
 
             try:
-                if gut.commit(src_context, src_path, prefix, update_untracked=update_untracked):
-                    gut.pull(dest_context, dest_path)
+                if gut_cmd.commit(src_context, src_path, prefix, update_untracked=update_untracked):
+                    gut_cmd.pull(dest_context, dest_path)
             except plumbum.commands.ProcessExecutionError:
                 out('\n\nError during commit-and-pull:\n')
                 traceback.print_exc(file=sys.stderr)
@@ -197,8 +197,8 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 
         commit_and_update('remote', update_untracked=True)
         commit_and_update('local', update_untracked=True)
-        gut.pull(remote, remote_path)
-        gut.pull(local, local_path)
+        gut_cmd.pull(remote, remote_path)
+        gut_cmd.pull(local, local_path)
 
         changed = {}
         changed_ignore = set()
@@ -206,7 +206,7 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
             try:
                 event = event_queue.get(True, 0.1 if changed else 10000)
             except Queue.Empty:
-                for system, paths in changed.iteritems():
+                for system, paths in changed.items():
                     commit_and_update(system, paths, update_untracked=(system in changed_ignore))
                 changed.clear()
                 changed_ignore.clear()
@@ -238,11 +238,11 @@ def main():
     if action in config.ALL_GUT_COMMANDS:
         local = plumbum.local
         init_context(local)
-        gut_exe_path = gut.exe_path(local)
+        gut_exe_path = gut_cmd.exe_path(local)
         # Build gut if needed
         if not plumbum.local.path(config.GUT_EXE_PATH).exists():
             ensure_build(local)
-        os.execv(unicode(gut_exe_path), [unicode(gut_exe_path)] + sys.argv[1:])
+        os.execv(str(gut_exe_path), [str(gut_exe_path)] + sys.argv[1:])
     else:
         local = plumbum.local
         init_context(local)

@@ -3,8 +3,8 @@ import traceback
 
 import plumbum
 
-import config
-from terminal import shutdown, out, out_dim, dim, quote, bright, color_error
+from . import config
+from .terminal import shutdown, out, out_dim, dim, quote, bright, color_error
 
 auto_install_deps = False
 
@@ -20,7 +20,7 @@ APT_GET_DEPS = ['gettext', 'autoconf', 'inotify-tools', 'autossh']
 
 def missing_dependency(context, name, retry_failed=None):
     if context._is_windows and name == 'inotify-tools':
-        import gut_build # late import due to circular dependency :(
+        from . import gut_build # late import due to circular dependency :(
         gut_build.git_clone_update(config.INOTIFY_WIN_REPO_URL, config.INOTIFY_WIN_PATH, config.INOTIFY_WIN_VERSION)
         out(dim('Building ') + 'inotify-win' + dim('...'))
         with context.cwd(context.path(config.INOTIFY_WIN_PATH)):
@@ -59,7 +59,7 @@ def missing_dependency(context, name, retry_failed=None):
         shutdown()
 
 def divine_missing_dependency(exception_text):
-    for (text, name) in DEPENDENCY_ERROR_MAP.iteritems():
+    for (text, name) in DEPENDENCY_ERROR_MAP.items():
         if text in exception_text:
             return name
         # Some systems say "command not found", others say "not found"

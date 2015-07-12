@@ -1,8 +1,8 @@
 from datetime import datetime
 
-import config
-from terminal import out, out_dim, dim, quote, color_commit, color_error, kill_previous_process, active_pidfiles, get_pidfile_path, Writer
-import util
+from . import config
+from .terminal import out, out_dim, dim, quote, color_commit, color_error, kill_previous_process, active_pidfiles, get_pidfile_path, Writer
+from . import util
 
 def exe_path(context):
     return context.path(config.GUT_EXE_PATH + '.exe' if context._is_windows else config.GUT_EXE_PATH)

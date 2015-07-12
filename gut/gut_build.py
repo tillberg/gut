@@ -5,10 +5,10 @@ import os
 
 import plumbum
 
-import config
-import deps
-from terminal import out, out_dim, dim, color_path, Writer
-import util
+from . import config
+from . import deps
+from .terminal import out, out_dim, dim, color_path, Writer
+from . import util
 
 def ensure_gut_folders(context):
     util.mkdirp(context, config.GUT_SRC_PATH)
@@ -105,7 +105,7 @@ def git_clone_update(repo_url, _local_path, version):
 def prepare(build_context):
     def rewrite(gut_src_path):
         out_dim('Rewriting git to gut...')
-        rename_git_to_gut_recursive(unicode(plumbum.local.path(gut_src_path)))
+        rename_git_to_gut_recursive(str(plumbum.local.path(gut_src_path)))
         out_dim(' done.\n')
     if build_context._is_windows:
         git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
@@ -123,7 +123,7 @@ def unprepare(build_context):
         git_hard_reset_and_clean(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
 def windows_path_to_mingw_path(path):
-    return u'/' + unicode(path).replace(':', '').replace('\\', '/')
+    return '/' + str(path).replace(':', '').replace('\\', '/')
 
 def build(context, _build_path):
     build_path = context.path(_build_path)

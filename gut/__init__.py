@@ -1,1 +1,1 @@
-import shell
+from . import shell
