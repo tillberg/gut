@@ -17,6 +17,8 @@ from . import config
 
 GUT_HASH_DISPLAY_CHARS = 10
 
+_SHUTDOWN_OBJECT = '3qo4c8h56t349yo57yfv534wto8i7435oi5'
+
 _shutting_down = False
 _shutting_down_lock = threading.Lock()
 
@@ -92,7 +94,6 @@ def shutdown(exit=True):
     with _shutting_down_lock:
         _shutting_down = True
     try:
-        get_event_loop().stop()
         # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
             out(dim('\nShutting down ') + process_name + dim(' on ') + context._name_ansi + dim('...'))
@@ -111,6 +112,12 @@ def shutdown(exit=True):
                     out_dim(' done.')
                     break
         out('\n')
+        for writer in writers:
+            writer.shutdown()
+        # These kind of run in the reverse order -- the first queues a task that tells run_forever not to actually run forever, while
+        # run_forever processes that task as well as all other pending tasks
+        asyncio.get_event_loop().call_soon(lambda: asyncio.get_event_loop().stop())
+        asyncio.get_event_loop().run_forever()
     except KeyboardInterrupt:
         pass
     if exit:
@@ -194,11 +201,8 @@ def get_nameish(context, name):
 writers = []
 last_temp_output = ''
 
-lock = threading.RLock()
-
 def to_stderr(s):
-    with lock:
-        sys.stderr.write(s)
+    sys.stderr.write(s)
 
 _terminal_columns = None
 def get_terminal_cols():
@@ -209,43 +213,30 @@ def get_terminal_cols():
 
 def clear_temp_output():
     global last_temp_output
-    with lock:
-        if last_temp_output:
-            # to_stderr('Clear %s characters\n' % len(last_temp_output))
-            to_stderr('\b \b' * len(last_temp_output))
-            last_temp_output = ''
+    if last_temp_output:
+        # to_stderr('Clear %s characters\n' % len(last_temp_output))
+        to_stderr('\b \b' * len(last_temp_output))
+        last_temp_output = ''
 
 def update_temp_output():
     global last_temp_output
-    with lock:
-        curr_lines = [writer.get_curr_line() for writer in writers]
-        # sys.stderr.write('lines: %s\n' % (curr_lines,))
-        curr_lines = [line for line in curr_lines if line]
-        clear_temp_output()
-        temp_output = colorize(' | '.join(curr_lines))
-        if temp_output:
-            temp_output = colorize(dim('... ')) + temp_output
-        if temp_output == last_temp_output:
-            return
-        clear_temp_output()
-        max_len = get_terminal_cols()
-        # XXX this doesn't take into account control characters yet
-        if len(temp_output) > max_len:
-            temp_output = temp_output[:max_len - 4] + ' ...'
-        if temp_output:
-            to_stderr(temp_output)
-        last_temp_output = temp_output
-
-_event_loop = None
-def get_event_loop():
-    global _event_loop
-    if not _event_loop:
-        _event_loop = asyncio.get_event_loop()
-        def run():
-            asyncio.set_event_loop(_event_loop)
-            _event_loop.run_forever()
-        run_daemon_thread(run)
-    return _event_loop
+    curr_lines = [writer.get_curr_line() for writer in writers]
+    # sys.stderr.write('lines: %s\n' % (curr_lines,))
+    curr_lines = [line for line in curr_lines if line]
+    clear_temp_output()
+    temp_output = colorize(' | '.join(curr_lines))
+    if temp_output:
+        temp_output = colorize(dim('... ')) + temp_output
+    if temp_output == last_temp_output:
+        return
+    clear_temp_output()
+    max_len = get_terminal_cols()
+    # XXX this doesn't take into account control characters yet
+    if len(temp_output) > max_len:
+        temp_output = temp_output[:max_len - 4] + ' ...'
+    if temp_output:
+        to_stderr(temp_output)
+    last_temp_output = temp_output
 
 class Writer:
     def __init__(self, context, name=None):
@@ -254,6 +245,8 @@ class Writer:
         self.prefix = '(@dim)[(@r)%s(@dim)](@r) ' % (get_nameish(context, name),)
         self.curr_line = ''
         writers.append(self)
+        self.out_queue = asyncio.Queue()
+        self.process_out()
 
     # def __call__(self, text):
     #     self.out(text)
@@ -262,13 +255,23 @@ class Writer:
     #     if self.curr_line:
     #         self.out(' ENDLINE\n')
 
-    def get_curr_line(self):
-        with lock:
-            return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
+    def shutdown(self):
+        self.out(_SHUTDOWN_OBJECT)
 
-    def out(self, text):
-        with lock:
-            text = self.curr_line + text
+    def get_curr_line(self):
+        return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
+
+    @asyncio.coroutine
+    def _process_out(self):
+        while True:
+            items = []
+            item = yield from self.out_queue.get()
+            items.append(item)
+            while not self.out_queue.empty():
+                items.append(self.out_queue.get_nowait())
+            if _SHUTDOWN_OBJECT in items:
+                break
+            text = self.curr_line + ''.join(items)
             while True:
                 line, sep, text = text.partition('\n')
                 # sys.stderr.write('%s\n' % ((line, sep, text),))
@@ -282,8 +285,17 @@ class Writer:
                     text = line
                     break
             self.curr_line = text
-        update_temp_output()
-        sys.stderr.flush()
+            update_temp_output()
+            sys.stderr.flush()
+
+    def process_out(self):
+        asyncio.get_event_loop().call_soon(lambda: asyncio.async(self._process_out()))
+
+    def out(self, text):
+        @asyncio.coroutine
+        def _out():
+            yield from self.out_queue.put(text)
+        asyncio.async(_out())
 
     def check_text_for_errors(self, line):
         if 'Please increase the amount of inotify watches allowed per user' in line:
@@ -297,41 +309,51 @@ class Writer:
                 out('(@error) *** Alternatively, you could also try reducing the total number of directories in your\n')
                 out('(@error) *** gut repo by moving unused files to another folder.\n')
 
-    def quote_fd(self, fd):
+    @asyncio.coroutine
+    def quote_fd(self, fd, block=False):
         @asyncio.coroutine
-        def run(loop):
+        def run():
             try:
+                eof_queue = asyncio.Queue() if block else None
+                @asyncio.coroutine
+                def eof():
+                    yield from eof_queue.put(True)
+                class MyProtocol(asyncio.Protocol):
+                    def data_received(_self, data):
+                        self.out(data.decode()) # XXX this isn't really safe to decode here
+                    def eof_received(_self):
+                        self.out('\n')
+                        if block:
+                            asyncio.async(eof())
                 reader = asyncio.StreamReader()
-                reader_protocol = asyncio.StreamReaderProtocol(reader)
-                yield from loop.connect_read_pipe(lambda: reader_protocol, fd)
-                while True:
-                    text = yield from reader.read(1)
-                    if text and not shutting_down():
-                        self.out(text.decode())
-                    else:
-                        break
-                out('\n')
+                reader_protocol = MyProtocol()
+                yield from asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, fd)
+                if block:
+                    yield from eof_queue.get()
             except Exception as ex:
                 if not shutting_down():
                     raise
-        loop = get_event_loop()
-        def queue_task():
-            loop.create_task(run(loop))
-        loop.call_soon_threadsafe(queue_task)
+        if block:
+            yield from run()
+        else:
+            asyncio.async(run())
 
+    @asyncio.coroutine
     def quote_proc(self, proc, wait=True):
-        self.quote_fd(proc.stdout)
-        self.quote_fd(proc.stderr)
+        asyncio.async(Writer(self.context, self.name).quote_fd(proc.stderr))
         if wait:
-            proc.wait()
+            yield from self.quote_fd(proc.stdout, block=True)
+        else:
+            asyncio.async(self.quote_fd(proc.stdout))
 
+    @asyncio.coroutine
     def quote(self, thing, wait=True):
         if isinstance(thing, str):
             self.out(thing)
         elif hasattr(thing, 'stdout') and hasattr(thing, 'wait'):
-            self.quote_proc(thing, wait=wait)
+            yield from self.quote_proc(thing, wait=wait)
         elif hasattr(thing, 'read'):
-            self.quote_fd(thing)
+            yield from self.quote_fd(thing)
         else:
             raise Exception('terminal.Writer.quote doesn\'t know what to do with %s' % (thing,))
 

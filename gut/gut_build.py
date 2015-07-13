@@ -1,3 +1,4 @@
+import asyncio
 import codecs
 import shutil
 import stat
@@ -125,30 +126,33 @@ def unprepare(build_context):
 def windows_path_to_mingw_path(path):
     return '/' + str(path).replace(':', '').replace('\\', '/')
 
+@asyncio.coroutine
 def build(context, _build_path):
     build_path = context.path(_build_path)
     gut_dist_path = context.path(config.GUT_DIST_PATH)
     install_prefix = 'prefix=%s' % (windows_path_to_mingw_path(gut_dist_path) if context._is_windows else gut_dist_path,)
     with context.cwd(build_path):
+        @asyncio.coroutine
         def build():
             status = Writer(context)
             log = Writer(context, 'make')
+            @asyncio.coroutine
             def make(name, args):
                 if context._is_windows:
                     make_path = windows_path_to_mingw_path(context.path(config.MSYSGIT_PATH) / 'bin/make.exe')
                     context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin NO_GETTEXT=1 ' + ' '.join([make_path] + args))]()
                 else:
-                    # context['make'][args]()
-                    Writer(context, dim('make_' + name)).quote(context['make'][args].popen())
+                    popen = context['make'][args].popen()
+                    yield from Writer(context, dim('make_' + name)).quote_proc(popen)
             if not context._is_windows:
                 status.out(dim('Configuring Makefile for gut...'))
-                make('configure', [install_prefix, 'configure'])
-                context[build_path / 'configure'][install_prefix]()
+                yield from make('configure', [install_prefix, 'configure'])
+                yield from Writer(context, dim('autoconf')).quote_proc(context[build_path / 'configure'][install_prefix].popen())
                 status.out(dim(' done.\n'))
             parallelism = util.get_num_cores(context)
             status.out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
-            make('build', [install_prefix, '-j', parallelism])
+            yield from make('build', [install_prefix, '-j', parallelism])
             status.out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
-            make('install', [install_prefix, 'install'])
+            yield from make('install', [install_prefix, 'install'])
             status.out(dim(' done.\n'))
-        deps.retry_method(context, build)
+        yield from deps.retry_method(context, build)

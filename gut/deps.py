@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import traceback
 
@@ -6,7 +7,7 @@ import plumbum
 from . import config
 from .terminal import shutdown, out, out_dim, dim, quote, bright, color_error
 
-auto_install_deps = False
+auto_install = False
 
 DEPENDENCY_ERROR_MAP = {
     'autoconf: not found': 'autoconf',
@@ -29,7 +30,7 @@ def missing_dependency(context, name, retry_failed=None):
         return
     has_apt_get = not context._is_windows and context['which']['apt-get'](retcode=None) != ''
     has_homebrew = not context._is_windows and context['which']['brew'](retcode=None) != ''
-    if (auto_install_deps and not retry_failed) and (has_apt_get or has_homebrew):
+    if (auto_install and not retry_failed) and (has_apt_get or has_homebrew):
         out(dim('Attempting to automatically install missing dependency ') + name + dim('...\n'))
         if has_apt_get:
             # This needs to go to the foreground in case it has a password prompt
@@ -47,7 +48,7 @@ def missing_dependency(context, name, retry_failed=None):
                 out('sudo apt-get install ' + name)
             else:
                 out('brew install ' + name)
-            if not auto_install_deps:
+            if not auto_install:
                 out(dim('\n\nOr if you\'d prefer, I\'ll try to automatically install dependencies as needed with the ') +
                     bright('--install-deps') + dim(' flag.\n'))
         # out(dim('\n\nOr to install all required dependencies, you could try running this instead:\n$ '))
@@ -67,7 +68,7 @@ def divine_missing_dependency(exception_text):
             return name
     return None
 
-
+@asyncio.coroutine
 def retry_method(context, cb):
     missing_dep_name = None
     last_missing_dep_name = None
@@ -79,7 +80,7 @@ def retry_method(context, cb):
         traceback.print_exc(file=sys.stderr)
     while True:
         try:
-            rval = cb()
+            rval = yield from cb()
         except KeyboardInterrupt:
             shutdown()
         except plumbum.commands.processes.ProcessExecutionError as ex:

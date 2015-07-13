@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import asyncio
 import os
 from queue import Queue
 import sys
@@ -12,12 +13,13 @@ from . import patch_plumbum; patch_plumbum.patch()
 
 from . import config
 from . import terminal as term
-from .terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit, run_daemon_thread
+from .terminal import shutdown, shutting_down, out, out_dim, dim, quote, color_error, color_path, color_host, color_host_path, color_commit, run_daemon_thread, Writer
 from . import deps
 from . import gut_cmd
 from . import gut_build
 from . import util
 
+@asyncio.coroutine
 def ensure_build(context):
     desired_git_version = config.GIT_WIN_VERSION if context._is_windows else config.GIT_VERSION
     if not gut_cmd.exe_path(context).exists() or desired_git_version.lstrip('v') not in gut_cmd.get_version(context):
@@ -30,7 +32,7 @@ def ensure_build(context):
             util.rsync(plumbum.local, config.GUT_SRC_PATH, context, build_path, excludes=['.git', 't'])
         else:
             build_path = config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH
-        gut_build.build(context, build_path)
+        yield from gut_build.build(context, build_path)
         out_dim('Cleaning up...')
         gut_build.unprepare(context)
         if context != plumbum.local:
@@ -233,7 +235,8 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
             out(dim('\nSIGINT received. Shutting down...'))
             shutdown(exit=False)
 
-def main():
+@asyncio.coroutine
+def main_coroutine():
     action = len(sys.argv) >= 2 and sys.argv[1]
     if action in config.ALL_GUT_COMMANDS:
         local = plumbum.local
@@ -241,7 +244,7 @@ def main():
         gut_exe_path = gut_cmd.exe_path(local)
         # Build gut if needed
         if not plumbum.local.path(config.GUT_EXE_PATH).exists():
-            ensure_build(local)
+            yield from ensure_build(local)
         os.execv(str(gut_exe_path), [str(gut_exe_path)] + sys.argv[1:])
     else:
         local = plumbum.local
@@ -257,13 +260,14 @@ def main():
         parser.add_argument('--no-color', action='store_true')
         def parse_args():
             args = parser.parse_args()
-            deps.auto_install_deps = args.install_deps
+            deps.auto_install = args.install_deps
             if args.no_color:
                 term.disable_color()
             return args
         if action == 'build':
             args = parse_args()
-            if not ensure_build(local):
+            did_build = yield from ensure_build(local)
+            if not did_build:
                 out(dim('gut ') + config.GIT_VERSION + dim(' has already been built.\n'))
         else:
             parser.add_argument('local')
@@ -281,6 +285,22 @@ def main():
             remote_addr, remote_path = args.remote.split(':', 1)
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
             sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.use_openssl, keyfile=args.identity)
+
+init_context(plumbum.local)
+tick_writer = Writer(plumbum.local, 'tick')
+@asyncio.coroutine
+def tick():
+    yield from asyncio.sleep(0.5)
+    tick_writer.out('tock\n')
+    asyncio.async(tick())
+
+def main():
+    try:
+        # asyncio.async(tick())
+        asyncio.get_event_loop().run_until_complete(main_coroutine())
+    except KeyboardInterrupt:
+        out(dim('\nSIGINT received. Shutting down...'))
+    shutdown(exit=False)
 
 if __name__ == '__main__':
     main()
