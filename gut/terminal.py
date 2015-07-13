@@ -126,7 +126,9 @@ def shutdown(exit=True):
 def ansi(num):
     return '\033[%sm' % (num,)
 
+RE_NON_WHITESPACE = re.compile('\S')
 RE_ANSI = re.compile('\033\[\d*m')
+RE_ANSI_OR_TEXT = re.compile('(\033\[\d*m)|(.)')
 ANSI_RESET_ALL = ansi('')
 ANSI_RESET_COLOR = ansi(39)
 ANSI_BRIGHT = ansi(1)
@@ -193,16 +195,32 @@ def colorize(text):
     return uncolorize(text) if no_color else RE_ANSI_MARK.sub(ansi_mark_replacer, text)
 
 def has_visible_text(text):
-    return uncolorize(text).strip() != ''
+    return RE_NON_WHITESPACE.match(uncolorize(text))
+
+def trim_ansi_string(text, max_len, ellipsis):
+    if len(uncolorize(text)) <= max_len:
+        return text
+    _max_len = max_len - len(uncolorize(ellipsis))
+    def get_some_text():
+        length = 0
+        for match in RE_ANSI_OR_TEXT.finditer(text):
+            if match.group(1):
+                yield match.group(1)
+            else:
+                _text = match.group(2)
+                if length + len(_text) >= _max_len:
+                    yield _text[:(_max_len - length)]
+                    break
+                else:
+                    length += len(_text)
+                    yield _text
+    return ''.join((s for s in get_some_text())) + ellipsis
 
 def get_nameish(context, name):
     return (context._name_ansi + (':' + name if name else '')) if context else '--'
 
 writers = []
 last_temp_output = ''
-
-def to_stderr(s):
-    sys.stderr.write(s)
 
 _terminal_columns = None
 def get_terminal_cols():
@@ -214,28 +232,23 @@ def get_terminal_cols():
 def clear_temp_output():
     global last_temp_output
     if last_temp_output:
-        # to_stderr('Clear %s characters\n' % len(last_temp_output))
-        to_stderr('\b \b' * len(last_temp_output))
+        sys.stderr.write('\b \b' * len(last_temp_output))
         last_temp_output = ''
 
+TEMP_OUTPUT_ELLIPSIS = colorize(dim(' ...'))
 def update_temp_output():
     global last_temp_output
     curr_lines = [writer.get_curr_line() for writer in writers]
-    # sys.stderr.write('lines: %s\n' % (curr_lines,))
     curr_lines = [line for line in curr_lines if line]
     clear_temp_output()
     temp_output = colorize(' | '.join(curr_lines))
-    if temp_output:
-        temp_output = colorize(dim('... ')) + temp_output
     if temp_output == last_temp_output:
         return
     clear_temp_output()
-    max_len = get_terminal_cols()
-    # XXX this doesn't take into account control characters yet
-    if len(temp_output) > max_len:
-        temp_output = temp_output[:max_len - 4] + ' ...'
+    max_len = get_terminal_cols() - 1
+    temp_output = trim_ansi_string(temp_output, max_len, TEMP_OUTPUT_ELLIPSIS)
     if temp_output:
-        to_stderr(temp_output)
+        sys.stderr.write(temp_output)
     last_temp_output = temp_output
 
 class Writer:
@@ -247,13 +260,6 @@ class Writer:
         writers.append(self)
         self.out_queue = asyncio.Queue()
         self.process_out()
-
-    # def __call__(self, text):
-    #     self.out(text)
-
-    # def __del__(self):
-    #     if self.curr_line:
-    #         self.out(' ENDLINE\n')
 
     def shutdown(self):
         self.out(_SHUTDOWN_OBJECT)
@@ -274,13 +280,12 @@ class Writer:
             text = self.curr_line + ''.join(items)
             while True:
                 line, sep, text = text.partition('\n')
-                # sys.stderr.write('%s\n' % ((line, sep, text),))
                 if sep:
                     # Avoid outputting lines that only contain control characters and whitespace
                     if has_visible_text(line):
                         clear_temp_output()
-                        to_stderr(colorize(self.prefix + line) + sep)
-                        # check_text_for_errors(context, line)
+                        sys.stderr.write(colorize(self.prefix + line) + sep)
+                        self.check_text_for_errors(uncolorize(line))
                 else:
                     text = line
                     break
@@ -356,7 +361,6 @@ class Writer:
             yield from self.quote_fd(thing)
         else:
             raise Exception('terminal.Writer.quote doesn\'t know what to do with %s' % (thing,))
-
 
 default_writer = Writer(None)
 
