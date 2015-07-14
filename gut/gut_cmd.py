@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 from . import config
@@ -16,22 +17,26 @@ def get_version(context):
 def rev_parse_head(context):
     return gut(context)['rev-parse', 'HEAD'](retcode=None).strip() or None
 
+@asyncio.coroutine
 def init(context, _sync_path):
     sync_path = context.path(_sync_path)
     util.mkdirp(context, sync_path)
     with context.cwd(sync_path):
         if not (sync_path / '.gut').exists():
-            quote(context, '', gut(context)['init']())
+            yield from quote_proc(context, '', gut(context)['init'].popen())
 
+@asyncio.coroutine
 def ensure_initial_commit(context, _sync_path):
     with context.cwd(sync_path):
         head = rev_parse_head(context)
         if head == 'HEAD':
             (sync_path / '.gutignore').write(config.DEFAULT_GUTIGNORE)
-            quote(context, '', gut(context)['add']['.gutignore']())
-            quote(context, '', gut(context)['commit']['--allow-empty', '--message', 'Initial commit']())
+            yield from quote_proc(context, '', gut(context)['add']['.gutignore'].popen())
+            yield from quote_proc(context, '', gut(context)['commit']['--allow-empty', '--message', 'Initial commit'].popen())
 
+@asyncio.coroutine
 def commit(context, path, prefix, update_untracked=False):
+    status = Writer(context, 'commit')
     with context.cwd(context.path(path)):
         # start = datetime.now()
         head_before = rev_parse_head(context)
@@ -39,41 +44,40 @@ def commit(context, path, prefix, update_untracked=False):
             files_out = gut(context)['ls-files', '-i', '--exclude-standard', '--', prefix]().strip()
             if files_out:
                 for filename in files_out.split('\n'):
-                    quote(context, '', dim('Untracking newly-.gutignored ') + filename)
-                    gut(context)['rm', '--cached', '--ignore-unmatch', '--quiet', '--', filename]()
-        out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
-        gut(context)['add', '--all', '--', prefix]()
-        commit_out = gut(context)['commit', '--message', 'autocommit'](retcode=None)
+                    status.out('(@dim)Untracking newly-.gutignored (@r)' + filename)
+                    quote_proc(context, 'gut-rm--cached', gut(context)['rm', '--cached', '--ignore-unmatch', '--quiet', '--', filename].popen())
+        status.out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
+        quote_proc(context, 'gut-add', gut(context)['add', '--all', '--', prefix].popen())
+        quote_proc(context, 'gut-commit', gut(context)['commit', '--message', 'autocommit'].popen())
         head_after = rev_parse_head(context)
         made_a_commit = head_before != head_after
-        out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + dim('.\n'))
-        if made_a_commit:
-            quote(context, '', commit_out)
+        status.out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + dim('.\n'))
         # quote(context, '', 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
         return made_a_commit
 
+@asyncio.coroutine
 def pull(context, path):
+    status = Writer(context, 'pull')
     with context.cwd(context.path(path)):
-        out(dim('Downloading changes to ') + context._name_ansi + dim('...'))
-        gut(context)['fetch', 'origin']()
-        out(dim(' done.\n'))
+        status.out(dim('Downloading changes to ') + context._name_ansi + dim('...'))
+        yield from quote_proc(context, 'gut-fetch', gut(context)['fetch', 'origin'].popen())
+        status.out(dim(' done.\n'))
+    @asyncio.coroutine
     def do_merge():
         with context.cwd(context.path(path)):
-            out(dim('Merging changes to ') + context._name_ansi + dim('...'))
-            _, stdout, stderr = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'].run(retcode=None)
+            status.out(dim('Merging changes to ') + context._name_ansi + dim('...'))
+            proc = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'].popen()
+            _, _, stderr = quote_proc(context, 'gut-merge', proc)
             need_commit = 'Your local changes to the following files would be overwritten' in stderr
             if need_commit:
-                out(color_error(' failed due to uncommitted changes.\n'))
+                status.out(color_error(' failed due to uncommitted changes.\n'))
             else:
-                out(dim(' done.\n'))
-            quote(context, '', stdout)
-            quote(context, '', stderr)
+                status.out(dim(' done.\n'))
             return need_commit
-    if do_merge():
-        out(dim('Committing outstanding changes before retrying merge...\n'))
-        commit(context, path, './', update_untracked=True)
-        do_merge()
-
+    if (yield from do_merge()):
+        status.out(dim('Committing outstanding changes before retrying merge...\n'))
+        yield from commit(context, path, './', update_untracked=True)
+        yield from do_merge()
 
 def setup_origin(context, path, tail_hash, gutd_connect_port):
     with context.cwd(context.path(path)):
@@ -84,6 +88,7 @@ def setup_origin(context, path, tail_hash, gutd_connect_port):
         gut(context)['config', 'user.name', hostname]()
         gut(context)['config', 'user.email', 'gut-sync@' + hostname]()
 
+@asyncio.coroutine
 def daemon(context, path, tail_hash, gutd_bind_port=None):
     """
     Start a git-daemon on the host, bound to port gutd_bind_port on the *localhost* network interface only.
@@ -101,4 +106,4 @@ def daemon(context, path, tail_hash, gutd_bind_port=None):
     pidfile_opt = '--pid-file=%s' % (get_pidfile_path(context, 'gut-daemon'),)
     proc = gut(context)['daemon', '--export-all', '--base-path=%s' % (base_path,), pidfile_opt, '--reuseaddr', '--listen=localhost', '--port=%s' % (gutd_bind_port,), base_path].popen()
     active_pidfiles.append((context, 'gut-daemon')) # gut-daemon writes its own pidfile
-    Writer(context, 'gut-daemon').quote(proc, wait=False)
+    asyncio.async(quote_proc(context, 'gut-daemon', proc, wait=False))

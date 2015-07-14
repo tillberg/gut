@@ -8,7 +8,7 @@ import plumbum
 
 from . import config
 from . import deps
-from .terminal import out, out_dim, dim, color_path, Writer
+from .terminal import Writer, quote_proc
 from . import util
 
 def ensure_gut_folders(context):
@@ -25,6 +25,7 @@ def rename_git_to_gut(s):
         .replace('DIGUT', 'DIGIT')
     )
 
+@asyncio.coroutine
 def rename_git_to_gut_recursive(root_path):
     for root, folders, files in os.walk(root_path):
         for orig_filename in files:
@@ -74,54 +75,61 @@ def rename_git_to_gut_recursive(root_path):
                 shutil.move(orig_path, path)
             folders.append(folder)
 
+@asyncio.coroutine
 def git_hard_reset_and_clean(repo_url, repo_path, version):
     local = plumbum.local
     with local.cwd(local.path(repo_path)):
         # Do a little sanity-check to make sure we're not running these (destructive) operations in some other repo:
         if not repo_url in local['git']['remote', '-v']():
             raise Exception('I think I might be trying to git-reset the wrong repo.')
-        local['git']['reset', '--hard', version]()
-        local['git']['clean', '-fdx']()
+        yield from quote_proc(local, '(@dim)git-reset', local['git']['reset', '--hard', version].popen(), quiet_out=True)
+        yield from quote_proc(local, '(@dim)git-clean', local['git']['clean', '-fdx'].popen(), quiet_out=True)
 
+@asyncio.coroutine
 def git_clone_update(repo_url, _local_path, version):
     local = plumbum.local
+    status = Writer(local)
     ensure_gut_folders(local)
     local_path = local.path(_local_path)
     if not (local_path / '.git').exists():
-        out(dim('Cloning ') + repo_url + dim(' into ') + color_path(local_path) + dim('...'))
-        local['git']['clone', repo_url, local_path]()
-        out_dim(' done.\n')
+        status.out('(@dim)Cloning (@r)%s (@dim)into (@path)%s(@dim)...\n' % (repo_url, local_path))
+        yield from quote_proc(local, '(@dim)git-clone', local['git']['clone', '--progress', repo_url, local_path].popen())
     with local.cwd(local_path):
         # Prevent windows from checking out CRLF line endings and then syncing them to a linux box, which subsequently
         # runs into weird errors due to the CRLFs:
         local['git']['config', 'core.autocrlf', 'false']()
         if not local['git']['rev-parse', version](retcode=None).strip():
-            out(dim('Updating ') + repo_url + dim(' in order to upgrade to ') + version + dim('...'))
-            local['git']['fetch']()
-            out_dim(' done.\n')
-    out(dim('Checking out ') + version + dim('...'))
-    git_hard_reset_and_clean(repo_url, local_path, version)
-    out_dim(' done.\n')
+            status.out('(@dim)Updating (@r)%s (@dim)in order to upgrade to (@r)%s (@dim)...' % (repo_url, version))
+            yield from quote_proc(local, '(@dim)git-fetch', local['git']['fetch'].popen())
+            status.out('(@dim) done.\n')
+    status.out('(@dim)Checking out (@r)%s (@dim)...' % (version,))
+    yield from git_hard_reset_and_clean(repo_url, local_path, version)
+    status.out('(@dim) done.\n')
 
+@asyncio.coroutine
 def prepare(build_context):
+    local = plumbum.local
+    status = Writer(local)
+    @asyncio.coroutine
     def rewrite(gut_src_path):
-        out_dim('Rewriting git to gut...')
-        rename_git_to_gut_recursive(str(plumbum.local.path(gut_src_path)))
-        out_dim(' done.\n')
+        status.out('(@dim)Rewriting git to gut...(@r)')
+        yield from rename_git_to_gut_recursive(str(local.path(gut_src_path)))
+        status.out('(@dim) done.(@r)\n')
     if build_context._is_windows:
-        git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
-        git_clone_update(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
-        rewrite(config.GUT_WIN_SRC_PATH)
+        yield from git_clone_update(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
+        yield from git_clone_update(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
+        yield from rewrite(config.GUT_WIN_SRC_PATH)
     else:
-        git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
-        rewrite(config.GUT_SRC_PATH)
+        yield from git_clone_update(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
+        yield from rewrite(config.GUT_SRC_PATH)
 
+@asyncio.coroutine
 def unprepare(build_context):
     if build_context._is_windows:
-        git_hard_reset_and_clean(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
-        git_hard_reset_and_clean(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
+        yield from git_hard_reset_and_clean(config.MSYSGIT_REPO_URL, config.MSYSGIT_PATH, config.MSYSGIT_VERSION)
+        yield from git_hard_reset_and_clean(config.GIT_WIN_REPO_URL, config.GUT_WIN_SRC_PATH, config.GIT_WIN_VERSION)
     else:
-        git_hard_reset_and_clean(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
+        yield from git_hard_reset_and_clean(config.GIT_REPO_URL, config.GUT_SRC_PATH, config.GIT_VERSION)
 
 def windows_path_to_mingw_path(path):
     return '/' + str(path).replace(':', '').replace('\\', '/')
@@ -142,17 +150,17 @@ def build(context, _build_path):
                     make_path = windows_path_to_mingw_path(context.path(config.MSYSGIT_PATH) / 'bin/make.exe')
                     context[context.path(config.MSYSGIT_PATH) / 'bin/bash.exe']['-c', ('PATH=/bin:/mingw/bin NO_GETTEXT=1 ' + ' '.join([make_path] + args))]()
                 else:
-                    popen = context['make'][args].popen()
-                    yield from Writer(context, dim('make_' + name)).quote_proc(popen)
+                    proc = context['make'][args].popen()
+                    yield from quote_proc(context, '(@dim)make_' + name, proc)
             if not context._is_windows:
-                status.out(dim('Configuring Makefile for gut...'))
+                status.out('(@dim)Configuring Makefile for gut...')
                 yield from make('configure', [install_prefix, 'configure'])
-                yield from Writer(context, dim('autoconf')).quote_proc(context[build_path / 'configure'][install_prefix].popen())
-                status.out(dim(' done.\n'))
+                yield from quote_proc(context, '(@dim)autoconf', context[build_path / 'configure'][install_prefix].popen())
+                status.out('(@dim) done.\n')
             parallelism = util.get_num_cores(context)
-            status.out(dim('Building gut using up to ') + parallelism + dim(' processes...'))
+            status.out('(@dim)Building gut using up to(@r) %s (@dim)processes...' % (parallelism,))
             yield from make('build', [install_prefix, '-j', parallelism])
-            status.out(dim(' installing to ') + color_path(gut_dist_path) + dim('...'))
+            status.out('(@dim) done.\n(@dim)Installing gut to (@path)%s(@dim)...' % (gut_dist_path,))
             yield from make('install', [install_prefix, 'install'])
-            status.out(dim(' done.\n'))
+            status.out('(@dim) done.\n')
         yield from deps.retry_method(context, build)

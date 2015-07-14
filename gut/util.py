@@ -1,3 +1,4 @@
+import asyncio
 import os
 import random
 import sys
@@ -7,7 +8,7 @@ import plumbum
 
 from . import config
 from . import deps
-from .terminal import out, out_dim, dim, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, run_daemon_thread, get_cmd
+from .terminal import out, out_dim, dim, color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutting_down, shutdown, quote_proc, get_cmd
 
 def rsync(src_context, src_path, dest_context, dest_path, excludes=[]):
     def get_path_str(context, path):
@@ -52,10 +53,12 @@ def append_inotify_change_events(context, watcher):
         watcher = watcher['--event', event]
     return watcher
 
+@asyncio.coroutine
 def watch_for_changes(context, path, event_prefix, event_queue):
     proc = None
     with context.cwd(context.path(path)):
         watched_root = (context['cmd']['/c', 'cd ,']() if context._is_windows else context['pwd']()).strip()
+        @asyncio.coroutine
         def run_watcher():
             watch_type = get_cmd(context, ['inotifywait', 'fswatch'])
             watcher = None
@@ -72,26 +75,31 @@ def watch_for_changes(context, path, event_prefix, event_queue):
                 raise Exception('missing ' + ('fswatch' if context._is_osx else 'inotifywait'))
             out(dim('Using ') + watch_type + dim(' to listen for changes in ') + context._sync_path + '\n')
             kill_previous_process(context, watch_type)
-            proc = watcher.popen()
-            save_process_pid(context, watch_type, proc.pid)
-            return proc
-        proc = deps.retry_method(context, run_watcher)
+            _proc = watcher.popen()
+            save_process_pid(context, watch_type, _proc.pid)
+            return _proc
+        proc = (yield from deps.retry_method(context, run_watcher))
+    @asyncio.coroutine
     def run():
+        reader = asyncio.StreamReader()
+        reader_protocol = asyncio.StreamReaderProtocol(reader)
+        asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, proc.stdout)
         while not shutting_down():
-            line = proc.stdout.readline()
+            line = yield from reader.readline(proc.stdout)
             if line != '':
                 changed_path = line.rstrip()
                 changed_path = os.path.abspath(os.path.join(watched_root, changed_path))
                 rel_path = os.path.relpath(changed_path, watched_root)
-                # out('changed_path: ' + changed_path + '\n')
-                # out('watched_root: ' + watched_root + '\n')
-                # out('changed ' + changed_path + ' -> ' + rel_path + '\n')
+                out('changed_path: ' + changed_path + '\n')
+                out('watched_root: ' + watched_root + '\n')
+                out('changed ' + changed_path + ' -> ' + rel_path + '\n')
                 event_queue.put((event_prefix, rel_path))
             else:
                 break
-    run_daemon_thread(run)
-    Writer(context, 'watch_%s' % (event_prefix,)).quote(proc.stderr)
+    asyncio.async(run())
+    asyncio.async(Writer(context, 'watch_%s' % (event_prefix,)).quote_fd(proc.stderr))
 
+@asyncio.coroutine
 def start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port):
     cmd = get_cmd(local, ['autossh', 'ssh'])
     if not cmd:
@@ -104,7 +112,7 @@ def start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_m
     command = command['-N', '-L', ssh_tunnel_opts, '-R', ssh_tunnel_opts, remote._ssh_address]
     proc = command.popen()
     save_process_pid(local, cmd, proc.pid)
-    Writer(local, cmd + '_out').quote(proc, wait=False)
+    asyncio.async(quote_proc(local, cmd + '_out', proc, wait=False))
 
 def restart_on_change(exe_path):
     def run():

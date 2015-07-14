@@ -71,20 +71,6 @@ def save_process_pid(context, process_name, pid):
     else:
         out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name_ansi + '\n')
 
-def run_daemon_thread(fn):
-    def run():
-        try:
-            fn()
-        except Exception as ex:
-            if not shutting_down():
-                out('\n\n')
-                traceback.print_exc(file=sys.stderr)
-                shutdown(exit=False)
-                sys.exit(1)
-    thread = threading.Thread(target=run)
-    thread.daemon = True
-    thread.start()
-
 def shutting_down():
     with _shutting_down_lock:
         return _shutting_down
@@ -92,6 +78,8 @@ def shutting_down():
 def shutdown(exit=True):
     global _shutting_down
     with _shutting_down_lock:
+        if _shutting_down:
+            return
         _shutting_down = True
     try:
         # out_dim('Shutting down sub-processes...\n')
@@ -116,8 +104,10 @@ def shutdown(exit=True):
             writer.shutdown()
         # These kind of run in the reverse order -- the first queues a task that tells run_forever not to actually run forever, while
         # run_forever processes that task as well as all other pending tasks
-        asyncio.get_event_loop().call_soon(lambda: asyncio.get_event_loop().stop())
-        asyncio.get_event_loop().run_forever()
+        loop = asyncio.get_event_loop()
+        loop.call_soon(lambda: asyncio.get_event_loop().stop())
+        if not loop.is_running():
+            loop.run_forever()
     except KeyboardInterrupt:
         pass
     if exit:
@@ -128,7 +118,7 @@ def ansi(num):
 
 RE_NON_WHITESPACE = re.compile('\S')
 RE_ANSI = re.compile('\033\[\d*m')
-RE_ANSI_OR_TEXT = re.compile('(\033\[\d*m)|(.)')
+RE_ANSI_OR_TEXT = re.compile('(\033\[\d*m)|(.[^\033]*)')
 ANSI_RESET_ALL = ansi('')
 ANSI_RESET_COLOR = ansi(39)
 ANSI_BRIGHT = ansi(1)
@@ -195,7 +185,7 @@ def colorize(text):
     return uncolorize(text) if no_color else RE_ANSI_MARK.sub(ansi_mark_replacer, text)
 
 def has_visible_text(text):
-    return RE_NON_WHITESPACE.match(uncolorize(text))
+    return RE_NON_WHITESPACE.search(uncolorize(text))
 
 def trim_ansi_string(text, max_len, ellipsis):
     if len(uncolorize(text)) <= max_len:
@@ -216,8 +206,16 @@ def trim_ansi_string(text, max_len, ellipsis):
                     yield _text
     return ''.join((s for s in get_some_text())) + ellipsis
 
+def render_line(text):
+    parts = text.rsplit('\r', 3)
+    if len(parts) == 1:
+        return parts[0]
+    else:
+        # This doesn't work with ANSI coloring:
+        return parts[-1] + parts[-2][len(parts[-1]):]
+
 def get_nameish(context, name):
-    return (context._name_ansi + (':' + name if name else '')) if context else '--'
+    return (context._name_ansi + ('(@dim):(@r)' + name if name else '')) if context else '--'
 
 writers = []
 last_temp_output = ''
@@ -232,7 +230,7 @@ def get_terminal_cols():
 def clear_temp_output():
     global last_temp_output
     if last_temp_output:
-        sys.stderr.write('\b \b' * len(last_temp_output))
+        sys.stderr.write('\r' + (' ' * len(uncolorize(last_temp_output))) + '\r')
         last_temp_output = ''
 
 TEMP_OUTPUT_ELLIPSIS = colorize(dim(' ...'))
@@ -240,7 +238,6 @@ def update_temp_output():
     global last_temp_output
     curr_lines = [writer.get_curr_line() for writer in writers]
     curr_lines = [line for line in curr_lines if line]
-    clear_temp_output()
     temp_output = colorize(' | '.join(curr_lines))
     if temp_output == last_temp_output:
         return
@@ -252,55 +249,60 @@ def update_temp_output():
     last_temp_output = temp_output
 
 class Writer:
-    def __init__(self, context, name=None):
+    def __init__(self, context, name=None, muted=False):
         self.context = context
         self.name = name
         self.prefix = '(@dim)[(@r)%s(@dim)](@r) ' % (get_nameish(context, name),)
         self.curr_line = ''
+        self.output = ''
+        self.muted = muted
         writers.append(self)
         self.out_queue = asyncio.Queue()
         self.process_out()
 
     def shutdown(self):
-        self.out(_SHUTDOWN_OBJECT)
+        self._out(_SHUTDOWN_OBJECT)
 
     def get_curr_line(self):
-        return (self.prefix + self.curr_line) if has_visible_text(self.curr_line) else None
+        rendered = render_line(self.curr_line)
+        return (self.prefix + rendered) if has_visible_text(rendered) else None
 
     @asyncio.coroutine
     def _process_out(self):
         while True:
-            items = []
-            item = yield from self.out_queue.get()
-            items.append(item)
-            while not self.out_queue.empty():
-                items.append(self.out_queue.get_nowait())
-            if _SHUTDOWN_OBJECT in items:
+            new_text = yield from self.out_queue.get()
+            if new_text == _SHUTDOWN_OBJECT:
                 break
-            text = self.curr_line + ''.join(items)
+            self.output += new_text
+            if self.muted:
+                continue
+            text = self.curr_line + new_text
             while True:
                 line, sep, text = text.partition('\n')
                 if sep:
+                    rendered = render_line(line) # flatten carriage returns
                     # Avoid outputting lines that only contain control characters and whitespace
-                    if has_visible_text(line):
+                    if has_visible_text(rendered):
                         clear_temp_output()
-                        sys.stderr.write(colorize(self.prefix + line) + sep)
-                        self.check_text_for_errors(uncolorize(line))
+                        sys.stderr.write(colorize(self.prefix + rendered) + sep)
+                        self.check_text_for_errors(uncolorize(rendered))
                 else:
-                    text = line
+                    self.curr_line = line
                     break
-            self.curr_line = text
             update_temp_output()
             sys.stderr.flush()
 
     def process_out(self):
         asyncio.get_event_loop().call_soon(lambda: asyncio.async(self._process_out()))
 
-    def out(self, text):
+    def _out(self, text):
         @asyncio.coroutine
         def _out():
             yield from self.out_queue.put(text)
         asyncio.async(_out())
+
+    def out(self, text):
+        self._out(text + '(@r)')
 
     def check_text_for_errors(self, line):
         if 'Please increase the amount of inotify watches allowed per user' in line:
@@ -319,22 +321,20 @@ class Writer:
         @asyncio.coroutine
         def run():
             try:
-                eof_queue = asyncio.Queue() if block else None
+                eof_queue = asyncio.Queue()
                 @asyncio.coroutine
                 def eof():
                     yield from eof_queue.put(True)
-                class MyProtocol(asyncio.Protocol):
+                class MyReaderProtocol(asyncio.Protocol):
                     def data_received(_self, data):
-                        self.out(data.decode()) # XXX this isn't really safe to decode here
+                        # print('[' + data.decode() + ']\n')
+                        self._out(data.decode()) # XXX it isn't really safe to decode multibyte stuff here
                     def eof_received(_self):
                         self.out('\n')
-                        if block:
-                            asyncio.async(eof())
-                reader = asyncio.StreamReader()
-                reader_protocol = MyProtocol()
+                        asyncio.async(eof())
+                reader_protocol = MyReaderProtocol()
                 yield from asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, fd)
-                if block:
-                    yield from eof_queue.get()
+                yield from eof_queue.get()
             except Exception as ex:
                 if not shutting_down():
                     raise
@@ -342,14 +342,6 @@ class Writer:
             yield from run()
         else:
             asyncio.async(run())
-
-    @asyncio.coroutine
-    def quote_proc(self, proc, wait=True):
-        asyncio.async(Writer(self.context, self.name).quote_fd(proc.stderr))
-        if wait:
-            yield from self.quote_fd(proc.stdout, block=True)
-        else:
-            asyncio.async(self.quote_fd(proc.stdout))
 
     @asyncio.coroutine
     def quote(self, thing, wait=True):
@@ -361,6 +353,17 @@ class Writer:
             yield from self.quote_fd(thing)
         else:
             raise Exception('terminal.Writer.quote doesn\'t know what to do with %s' % (thing,))
+
+@asyncio.coroutine
+def quote_proc(context, name, proc, quiet_out=False, quiet_err=False, wait=True):
+    writer_stdout = Writer(context, name + '(@dim)-out', muted=quiet_out)
+    writer_stderr = Writer(context, name + '(@dim)-err', muted=quiet_err)
+    asyncio.async(writer_stderr.quote_fd(proc.stderr))
+    if wait:
+        yield from writer_stdout.quote_fd(proc.stdout, block=True)
+        return (proc.returncode, writer_stdout.output, writer_stderr.output)
+    else:
+        writer_stdout.async(writer_stdout.quote_fd(proc.stdout))
 
 default_writer = Writer(None)
 
