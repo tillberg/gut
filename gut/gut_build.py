@@ -160,7 +160,7 @@ def build(context, _build_path):
             parallelism = util.get_num_cores(context)
             status.out('(@dim)Building gut using up to(@r) %s (@dim)processes...' % (parallelism,))
             yield from make('build', [install_prefix, '-j', parallelism])
-            status.out('(@dim) done.\n(@dim)Installing gut to (@path)%s(@dim)...' % (gut_dist_path,))
+            status.out('(@dim) done.\n(@dim)Installing gut to (@path)%s(@r)(@dim)...' % (gut_dist_path,))
             yield from make('install', [install_prefix, 'install'])
             status.out('(@dim) done.\n')
         yield from deps.retry_method(context, build)

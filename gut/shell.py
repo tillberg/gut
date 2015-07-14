@@ -13,7 +13,7 @@ from . import patch_plumbum; patch_plumbum.patch()
 
 from . import config
 from . import terminal as term
-from .terminal import shutdown, shutting_down, color_host_path, color_commit, Writer
+from .terminal import shutdown, color_host_path, color_commit, Writer, on_shutdown
 from . import deps
 from . import gut_cmd
 from . import gut_build
@@ -196,7 +196,15 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
             status.out('\n\n(@error)Error during commit-and-pull:\n')
             traceback.print_exc(file=sys.stderr)
 
-    event_queue = Queue.Queue()
+    event_queue = asyncio.Queue()
+    SHUTDOWN_STR = '3qo4c8h56t349yo57yfv534wto8i7435oi5'
+    def shutdown_watch_consumer():
+        @asyncio.coroutine
+        def _shutdown_watch_consumer():
+            yield from event_queue.put(SHUTDOWN_STR)
+        asyncio.async(_shutdown_watch_consumer())
+    on_shutdown(shutdown_watch_consumer)
+
     yield from util.watch_for_changes(local, local_path, 'local', event_queue)
     yield from util.watch_for_changes(remote, remote_path, 'remote', event_queue)
     # The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
@@ -209,15 +217,18 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
 
     changed = {}
     changed_ignore = set()
-    while not shutting_down():
+    while True:
         try:
-            event = event_queue.get(True, 0.1 if changed else 10000)
-        except Queue.Empty:
+            fut = event_queue.get()
+            event = yield from (asyncio.wait_for(fut, 0.1) if changed else fut)
+        except asyncio.TimeoutError:
             for system, paths in changed.items():
                 yield from commit_and_update(system, paths, update_untracked=(system in changed_ignore))
             changed.clear()
             changed_ignore.clear()
         else:
+            if event == SHUTDOWN_STR:
+                break
             system, path = event
             # Ignore events inside the .gut folder; these should also be filtered out in inotifywait/fswatch/etc if possible
             path_parts = path.split(os.sep)
@@ -227,11 +238,11 @@ def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=F
                 changed[system].add(path)
                 if path_parts[-1] == '.gutignore':
                     changed_ignore.add(system)
-                    # out('changed_ignore %s on %s\n' % (path, system))
-                # else:
-                #     out('changed %s %s\n' % (system, path))
-            # else:
-            #     out('ignoring changed %s %s\n' % (system, path))
+                    status.out('changed_ignore %s on %s\n' % (path, system))
+                else:
+                    status.out('changed %s %s\n' % (system, path))
+            else:
+                status.out('ignoring changed %s %s\n' % (system, path))
 
 @asyncio.coroutine
 def main_coroutine():
@@ -246,15 +257,14 @@ def main_coroutine():
             yield from ensure_build(local)
         os.execv(gut_exe_path, [gut_exe_path] + sys.argv[1:])
     else:
+        if '--version' in sys.argv:
+            import pkg_resources
+            print('gut-sync version %s' % (pkg_resources.require("gut")[0].version,))
+            return
         local = plumbum.local
         init_context(local)
         parser = argparse.ArgumentParser()
         parser.add_argument('action', choices=['build', 'sync'])
-        parser.add_argument('--version', action='store_true')
-        if parser.parse_args().version:
-            import pkg_resources
-            status.out('gut-sync version %s\n' % (pkg_resources.require("gut")[0].version,))
-            return
         parser.add_argument('--install-deps', action='store_true')
         parser.add_argument('--no-color', action='store_true')
         def parse_args():
@@ -279,7 +289,7 @@ def main_coroutine():
             if ':' not in args.remote:
                 parser.error('remote must include both the hostname and path, separated by a colon')
             if args.dev:
-                util.restart_on_change(os.path.abspath(__file__))
+                asyncio.async(util.restart_on_change(os.path.abspath(__file__)))
             remote_addr, remote_path = args.remote.split(':', 1)
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
             yield from sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.use_openssl, keyfile=args.identity)

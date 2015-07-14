@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 
 from . import config
-from .terminal import out, out_dim, dim, quote, color_commit, color_error, kill_previous_process, active_pidfiles, get_pidfile_path, Writer
+from .terminal import quote_proc, color_commit, kill_previous_process, active_pidfiles, get_pidfile_path, Writer
 from . import util
 
 def exe_path(context):
@@ -46,36 +46,36 @@ def commit(context, path, prefix, update_untracked=False):
                 for filename in files_out.split('\n'):
                     status.out('(@dim)Untracking newly-.gutignored (@r)' + filename)
                     quote_proc(context, 'gut-rm--cached', gut(context)['rm', '--cached', '--ignore-unmatch', '--quiet', '--', filename].popen())
-        status.out(dim('Checking ') + context._name_ansi + dim(' for changes (scope=') + prefix + dim(')...'))
+        status.out('(@dim)Checking %s (@dim)for changes (scope=(@r)%s(@dim))...' % (context._name_ansi, prefix))
         quote_proc(context, 'gut-add', gut(context)['add', '--all', '--', prefix].popen())
         quote_proc(context, 'gut-commit', gut(context)['commit', '--message', 'autocommit'].popen())
         head_after = rev_parse_head(context)
         made_a_commit = head_before != head_after
-        status.out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + dim('.\n'))
-        # quote(context, '', 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
+        status.out(' ' + (('committed ' + color_commit(head_after)) if made_a_commit else 'none') + '(@dim).\n')
+        # status.out(context, '', 'gut.commit took %.2f seconds' % ((datetime.now() - start).total_seconds(),))
         return made_a_commit
 
 @asyncio.coroutine
 def pull(context, path):
     status = Writer(context, 'pull')
     with context.cwd(context.path(path)):
-        status.out(dim('Downloading changes to ') + context._name_ansi + dim('...'))
+        status.out('(@dim)Downloading changes to (@r)%s(@dim)...' % (context._name_ansi,))
         yield from quote_proc(context, 'gut-fetch', gut(context)['fetch', 'origin'].popen())
-        status.out(dim(' done.\n'))
+        status.out('(@dim) done.\n')
     @asyncio.coroutine
     def do_merge():
         with context.cwd(context.path(path)):
-            status.out(dim('Merging changes to ') + context._name_ansi + dim('...'))
+            status.out('(@dim)Merging changes to (@r)%s(@dim)...' % (context._name_ansi,))
             proc = gut(context)['merge', 'origin/master', '--strategy=recursive', '--strategy-option=theirs', '--no-edit'].popen()
             _, _, stderr = quote_proc(context, 'gut-merge', proc)
             need_commit = 'Your local changes to the following files would be overwritten' in stderr
             if need_commit:
-                status.out(color_error(' failed due to uncommitted changes.\n'))
+                status.out('(@error) failed due to uncommitted changes.\n')
             else:
-                status.out(dim(' done.\n'))
+                status.out('(@dim) done.\n')
             return need_commit
     if (yield from do_merge()):
-        status.out(dim('Committing outstanding changes before retrying merge...\n'))
+        status.out('(@dim)Committing outstanding changes before retrying merge...\n')
         yield from commit(context, path, './', update_untracked=True)
         yield from do_merge()
 

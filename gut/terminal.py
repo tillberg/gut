@@ -17,10 +17,7 @@ from . import config
 
 GUT_HASH_DISPLAY_CHARS = 10
 
-_SHUTDOWN_OBJECT = '3qo4c8h56t349yo57yfv534wto8i7435oi5'
-
-_shutting_down = False
-_shutting_down_lock = threading.Lock()
+shutting_down = False
 
 active_pidfiles = []
 
@@ -54,37 +51,35 @@ def kill_previous_process(context, process_name):
                 # This process is either not running or is something else now
                 return
             command = context['kill']['-f', pid]
-        _, stdout, stderr = command.run(retcode=None)
-        quote(context, '', stdout)
-        quote(context, '', stderr)
+        quote_proc(context, '(@dim)pkill', command.popen())
 
 def save_process_pid(context, process_name, pid):
+    status = Writer(context)
     my_path = get_pidfile_path(context, process_name)
     if not pid:
         # --newest is not supported in Darwin; -n work in both Darwin and Linux, though
         pid = context['pgrep']['-n', process_name](retcode=None).strip()
         if pid:
-            out(dim('Using PID of ') + pid + dim(' (from `pgrep -n ' + process_name + '`) to populate ') + color_path(my_path) + dim(' on ') + context._name_ansi + dim('.\n'))
+            status.out('(@dim)Using PID of (@r)%s(@dim) (from `pgrep -n (@r)%s(@dim)`) to populate (@path)%s (@dim)on (@r)%s(@dim).\n' % (pid, process_name, my_path, context._name_ansi))
     if pid:
         active_pidfiles.append((context, process_name))
-        my_path.write('%s' % (pid,))
+        my_path.write(('%s' % (pid,)).encode())
     else:
-        out(color_error('Could not save pidfile for ') + process_name + color_error(' on ') + context._name_ansi + '\n')
+        status.out('(@error)Could not save pidfile for (@r)%s(@error) on (@r)%s\n' % (process_name, context._name_ansi))
 
-def shutting_down():
-    with _shutting_down_lock:
-        return _shutting_down
+shutdown_callbacks = []
+def on_shutdown(method):
+    shutdown_callbacks.append(method)
 
 def shutdown(exit=True):
-    global _shutting_down
-    with _shutting_down_lock:
-        if _shutting_down:
-            return
-        _shutting_down = True
+    status = Writer(None)
+    global shutting_down
+    if shutting_down:
+        return
+    shutting_down = True
     try:
-        # out_dim('Shutting down sub-processes...\n')
         for context, process_name in active_pidfiles:
-            out(dim('\nShutting down ') + process_name + dim(' on ') + context._name_ansi + dim('...'))
+            status.out('\n(@dim)Shutting down (@r)%s(@dim) on (@r)%s(@dim)...' % (process_name, context._name_ansi))
             retries = 3
             while True:
                 try:
@@ -92,16 +87,16 @@ def shutdown(exit=True):
                 except Exception as ex:
                     retries -= 1
                     if retries <= 0:
-                        out(color_error(' failed: "%s".' % (ex,)))
+                        status.out('(@error) failed: "%s".' % (ex,))
                         break
                     import time
                     time.sleep(1)
                 else:
-                    out_dim(' done.')
+                    status.out('(@dim) done.')
                     break
-        out('\n')
-        for writer in writers:
-            writer.shutdown()
+        status.out('\n')
+        for callback in shutdown_callbacks:
+            callback()
         # These kind of run in the reverse order -- the first queues a task that tells run_forever not to actually run forever, while
         # run_forever processes that task as well as all other pending tasks
         loop = asyncio.get_event_loop()
@@ -132,26 +127,11 @@ COLOR_HOST = ansi(ANSI_COLORS['yellow'])
 COLOR_ERROR = ansi(ANSI_COLORS['red'])
 COLOR_COMMIT = ansi(ANSI_COLORS['green'])
 
-def color_path(s):
-    return '(@path)%s(@r)' % (s,)
-
-def color_host(s):
-    return '(@host)%s(@r)' % (s,)
-
-def color_error(s):
-    return '(@error)%s(@r)' % (s,)
-
 def color_commit(commitish):
     return '(@commit)%s(@r)' % (commitish or 'None')[:GUT_HASH_DISPLAY_CHARS]
 
-def dim(text):
-    return '(@dim)' + str(text) + '(@r)'
-
-def bright(text):
-    return '(@bright)' + str(text) + '(@r)'
-
 def color_host_path(context, path):
-    return (context._name_ansi + dim(':') if not context._is_local else '') + '(@path)' + str(context.path(path)) + '(@r)'
+    return ((context._name_ansi + '(@dim):(@r)') if not context._is_local else '') + ('(@path)%s(@r)' % (context.path(path),))
 
 no_color = False
 def disable_color():
@@ -233,7 +213,7 @@ def clear_temp_output():
         sys.stderr.write('\r' + (' ' * len(uncolorize(last_temp_output))) + '\r')
         last_temp_output = ''
 
-TEMP_OUTPUT_ELLIPSIS = colorize(dim(' ...'))
+TEMP_OUTPUT_ELLIPSIS = colorize('(@dim) ...')
 def update_temp_output():
     global last_temp_output
     curr_lines = [writer.get_curr_line() for writer in writers]
@@ -249,6 +229,8 @@ def update_temp_output():
     last_temp_output = temp_output
 
 class Writer:
+    SHUTDOWN_STR = '3qo4c8h56t349yo57yfv534wto8i7435oi5'
+
     def __init__(self, context, name=None, muted=False):
         self.context = context
         self.name = name
@@ -259,9 +241,7 @@ class Writer:
         writers.append(self)
         self.out_queue = asyncio.Queue()
         self.process_out()
-
-    def shutdown(self):
-        self._out(_SHUTDOWN_OBJECT)
+        on_shutdown(lambda: self._out(Writer.SHUTDOWN_STR))
 
     def get_curr_line(self):
         rendered = render_line(self.curr_line)
@@ -271,7 +251,7 @@ class Writer:
     def _process_out(self):
         while True:
             new_text = yield from self.out_queue.get()
-            if new_text == _SHUTDOWN_OBJECT:
+            if new_text == Writer.SHUTDOWN_STR:
                 break
             self.output += new_text
             if self.muted:
@@ -306,15 +286,15 @@ class Writer:
 
     def check_text_for_errors(self, line):
         if 'Please increase the amount of inotify watches allowed per user' in line:
-            out('(@error) *** You\'ve hit the inotify max_user_watches limit on (@r)%s(@error).\n' % (context._name_ansi,))
+            self.out('(@error) *** You\'ve hit the inotify max_user_watches limit on (@r)%s(@error).\n' % (context._name_ansi,))
             current_limit = context.path('/proc/sys/fs/inotify/max_user_watches').read().strip()
             if current_limit:
-                out('(@error) *** The current limit (from /proc/sys/fs/inotify/max_user_watches) is (@r)%s(@error).\n' % (current_limit,))
+                self.out('(@error) *** The current limit (from /proc/sys/fs/inotify/max_user_watches) is (@r)%s(@error).\n' % (current_limit,))
             if context._is_linux:
-                out('(@error) *** To increase this limit, something like this might work:\n')
-                out('(@error) *** echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p\n')
-                out('(@error) *** Alternatively, you could also try reducing the total number of directories in your\n')
-                out('(@error) *** gut repo by moving unused files to another folder.\n')
+                self.out('(@error) *** To increase this limit, something like this might work:\n')
+                self.out('(@error) *** echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p\n')
+                self.out('(@error) *** Alternatively, you could also try reducing the total number of directories in your\n')
+                self.out('(@error) *** gut repo by moving unused files to another folder.\n')
 
     @asyncio.coroutine
     def quote_fd(self, fd, block=False):
@@ -336,23 +316,12 @@ class Writer:
                 yield from asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, fd)
                 yield from eof_queue.get()
             except Exception as ex:
-                if not shutting_down():
+                if not shutting_down:
                     raise
         if block:
             yield from run()
         else:
             asyncio.async(run())
-
-    @asyncio.coroutine
-    def quote(self, thing, wait=True):
-        if isinstance(thing, str):
-            self.out(thing)
-        elif hasattr(thing, 'stdout') and hasattr(thing, 'wait'):
-            yield from self.quote_proc(thing, wait=wait)
-        elif hasattr(thing, 'read'):
-            yield from self.quote_fd(thing)
-        else:
-            raise Exception('terminal.Writer.quote doesn\'t know what to do with %s' % (thing,))
 
 @asyncio.coroutine
 def quote_proc(context, name, proc, quiet_out=False, quiet_err=False, wait=True):
@@ -363,15 +332,7 @@ def quote_proc(context, name, proc, quiet_out=False, quiet_err=False, wait=True)
         yield from writer_stdout.quote_fd(proc.stdout, block=True)
         return (proc.returncode, writer_stdout.output, writer_stderr.output)
     else:
-        writer_stdout.async(writer_stdout.quote_fd(proc.stdout))
-
-default_writer = Writer(None)
-
-def out(text):
-    default_writer.out(text)
-
-def out_dim(text):
-    default_writer.out(dim(text))
+        asyncio.async(writer_stdout.quote_fd(proc.stdout))
 
 def quote(context, name, text):
     Writer(context, name).out(text)
