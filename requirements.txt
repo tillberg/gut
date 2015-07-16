@@ -1,2 +1,2 @@
-plumbum==1.4.2
-paramiko==1.15.2
+asyncssh>=1.2.0
+pycrypto>=2.6.1

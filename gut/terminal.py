@@ -11,7 +11,6 @@ except ImportError:
     pass
 else:
     colorama.init()
-import plumbum
 
 from . import config
 

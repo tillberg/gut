@@ -12,8 +12,8 @@ setup(
     url = "https://github.com/tillberg/gut",
     packages = ['gut'],
     install_requires=[
-        "plumbum>=1.4.2",
-        "paramiko>=1.15.2",
+        "asyncssh>=1.2.0",
+        "pycrypto>=2.6.1",
     ],
     classifiers = [
         "Development Status :: 3 - Alpha",

@@ -115,10 +115,9 @@ class MySSHClient(asyncssh.SSHClient):
         pass
 
 class Context:
-    def __init__(self, path=None, host=None, user=None, keyfile=None):
+    def __init__(self, host=None, user=None, keyfile=None):
         self.host = host
         self.user = user
-        self.path = path
         self.keyfile = keyfile
         self._conn = None
         self._client = None

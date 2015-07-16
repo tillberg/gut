@@ -5,8 +5,9 @@ from . import config
 from .terminal import quote_proc, color_commit, kill_previous_process, active_pidfiles, get_pidfile_path, Writer
 from . import util
 
+@asyncio.coroutine
 def exe_path(context):
-    return context.path(config.GUT_EXE_PATH + '.exe' if context._is_windows else config.GUT_EXE_PATH)
+    return (yield from context.abspath(config.GUT_EXE_PATH + '.exe' if context._is_windows else config.GUT_EXE_PATH))
 
 def gut(context):
     return context[exe_path(context)]

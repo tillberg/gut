@@ -4,8 +4,6 @@ import random
 import sys
 import time
 
-import plumbum
-
 from . import config
 from . import deps
 from .terminal import color_host_path, kill_previous_process, save_process_pid, get_pidfile_path, active_pidfiles, shutdown, on_shutdown, quote_proc, get_cmd, Writer

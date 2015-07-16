@@ -9,9 +9,6 @@ import sys
 import time
 import traceback
 
-import plumbum
-from . import patch_plumbum; patch_plumbum.patch()
-
 from . import bismuth
 from . import config
 from . import terminal as term
@@ -82,17 +79,28 @@ def init_context(context, sync_path=None, host=None, user=None):
 log = Writer(None)
 
 class SyncContext(bismuth.Context):
-    def __init__(self, sync_path=None, *args, **kwargs):
+    @classmethod
+    @asyncio.coroutine
+    def make(cls, sync_path=None, *args, **kwargs):
+        self = SyncContext()
         bismuth.Context.__init__(self, *args, **kwargs)
         self.sync_path = sync_path
         self.sync_path_ansi = '(@path)%s(@r)' % (self.sync_path,)
+        self.host_ansi = '(@host)%s(@r)' % (self.host or 'localhost',)
+        self._is_local = not self.host
+        uname = yield from self.uname()
+        self._is_osx = uname == 'Darwin'
+        self._is_linux = uname == 'Linux'
+        self._is_windows = uname == 'Windows'
+        self._ssh_address = (('%s@' % (self.user,) if self.user else '') + self.host) if self.host else ''
+        self.full_sync_path_ansi = (self.host_ansi + '(@dim):(@r)' if self._is_local else '') + self.sync_path_ansi
+        return self
 
 @asyncio.coroutine
 def sync(local_path, remote_user, remote_host, remote_path, keyfile=None):
-    local = SyncContext(sync_path=local_path)
-    remote = SyncContext(sync_path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
+    local = yield from SyncContext.make(sync_path=local_path)
+    remote = yield from SyncContext.make(sync_path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
 
-    return
     status.out('(@dim)Syncing ' + local.sync_path_ansi + ' (@dim)with ' + remote.sync_path_ansi + '\n')
 
     ports = util.find_open_ports([local, remote], 3)
@@ -244,8 +252,7 @@ def main_coroutine():
     status = Writer(None)
     action = len(sys.argv) >= 2 and sys.argv[1]
     if action in config.ALL_GUT_COMMANDS:
-        local = plumbum.local
-        init_context(local)
+        local = bismuth.Context()
         gut_exe_path = str(gut_cmd.exe_path(local))
         # Build gut if needed
         if not os.path.exists(gut_exe_path):
@@ -271,8 +278,7 @@ def main_coroutine():
             return args
         if action == 'build':
             args = parser.parse_args()
-            local = plumbum.local
-            init_context(local)
+            local = yield from SyncContext.make()
             if not (yield from ensure_build(local)):
                 status.out('(@dim)gut ' + config.GIT_VERSION + '(@dim) has already been built.\n')
         else:
@@ -303,7 +309,7 @@ def main():
     try:
         # asyncio.async(tick())
         asyncio.get_event_loop().run_until_complete(main_coroutine())
-    except SystemExit:
+    except (SystemExit, Exception):
         shutdown(exit=False)
         raise
     except KeyboardInterrupt:

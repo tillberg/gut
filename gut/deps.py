@@ -2,8 +2,6 @@ import asyncio
 import sys
 import traceback
 
-import plumbum
-
 from . import config
 from .terminal import shutdown, Writer, quote_proc
 

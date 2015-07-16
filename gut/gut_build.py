@@ -4,8 +4,6 @@ import shutil
 import stat
 import os
 
-import plumbum
-
 from . import config
 from . import deps
 from .terminal import Writer, quote_proc
