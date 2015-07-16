@@ -220,16 +220,18 @@ def update_temp_output():
     curr_lines = [line for line in curr_lines if line]
     temp_output = colorize(' | '.join(curr_lines))
     if temp_output == last_temp_output:
-        return
+        return False
     clear_temp_output()
     max_len = get_terminal_cols() - 1
     temp_output = trim_ansi_string(temp_output, max_len, TEMP_OUTPUT_ELLIPSIS)
     if temp_output:
         sys.stderr.write(temp_output)
     last_temp_output = temp_output
+    return True
 
 class Writer:
     SHUTDOWN_STR = '3qo4c8h56t349yo57yfv534wto8i7435oi5'
+    FLUSH_LINE_STR = 'o984325tyo3v487thgo458hgvbo875h4vt'
 
     def __init__(self, context, name=None, muted=False):
         self.context = context
@@ -251,35 +253,34 @@ class Writer:
     def _process_out(self):
         while True:
             new_text = yield from self.out_queue.get()
+            if new_text == Writer.SHUTDOWN_STR or new_text == Writer.FLUSH_LINE_STR:
+                text = self.curr_line + '\n'
+            else:
+                self.output += new_text
+                text = self.curr_line + new_text
+            if not self.muted:
+                while True:
+                    line, sep, text = text.partition('\n')
+                    if sep:
+                        rendered = render_line(line) # flatten carriage returns
+                        # Avoid outputting lines that only contain control characters and whitespace
+                        if has_visible_text(rendered):
+                            clear_temp_output()
+                            sys.stderr.write(colorize(self.prefix + rendered) + sep)
+                            self.check_text_for_errors(uncolorize(rendered))
+                    else:
+                        self.curr_line = line
+                        break
+                if update_temp_output():
+                    sys.stderr.flush()
             if new_text == Writer.SHUTDOWN_STR:
                 break
-            self.output += new_text
-            if self.muted:
-                continue
-            text = self.curr_line + new_text
-            while True:
-                line, sep, text = text.partition('\n')
-                if sep:
-                    rendered = render_line(line) # flatten carriage returns
-                    # Avoid outputting lines that only contain control characters and whitespace
-                    if has_visible_text(rendered):
-                        clear_temp_output()
-                        sys.stderr.write(colorize(self.prefix + rendered) + sep)
-                        self.check_text_for_errors(uncolorize(rendered))
-                else:
-                    self.curr_line = line
-                    break
-            update_temp_output()
-            sys.stderr.flush()
 
     def process_out(self):
         asyncio.get_event_loop().call_soon(lambda: asyncio.async(self._process_out()))
 
     def _out(self, text):
-        @asyncio.coroutine
-        def _out():
-            yield from self.out_queue.put(text)
-        asyncio.async(_out())
+        self.out_queue.put_nowait(text)
 
     def out(self, text):
         self._out(text + '(@r)')
@@ -297,24 +298,30 @@ class Writer:
                 self.out('(@error) *** gut repo by moving unused files to another folder.\n')
 
     @asyncio.coroutine
+    def quote_channel(self, channel):
+        while True:
+            data = yield from channel.read()
+            # print ('quote_channel %r' % (data,))
+            if data == None:
+                self.out_queue.put_nowait(Writer.FLUSH_LINE_STR)
+                break
+            text = data if isinstance(data, str) else data.decode() # XXX it isn't really safe to decode multibyte stuff here
+            self.out_queue.put_nowait(text)
+
+    @asyncio.coroutine
     def quote_fd(self, fd):
         try:
             eof_queue = asyncio.Queue()
-            @asyncio.coroutine
-            def eof():
-                yield from eof_queue.put(True)
             class MyReaderProtocol(asyncio.Protocol):
                 def data_received(_self, data):
-                    print('data received [' + data.decode() + ']')
+                    # print('data received [' + data.decode() + ']')
                     self._out(data.decode()) # XXX it isn't really safe to decode multibyte stuff here
                 def eof_received(_self):
                     self.out('\n')
-                    asyncio.async(eof())
+                    eof_queue.put_nowait(True)
             reader_protocol = MyReaderProtocol()
             yield from asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, fd)
-            print('waiting for eof')
             yield from eof_queue.get()
-            print('got eof')
         except Exception as ex:
             if not shutting_down:
                 raise

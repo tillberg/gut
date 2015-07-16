@@ -3,8 +3,10 @@
 import argparse
 import asyncio
 import asyncssh
+import io
 import os
 from queue import Queue
+import shlex
 import sys
 import time
 import traceback
@@ -78,127 +80,206 @@ def init_context(context, sync_path=None, host=None, user=None):
     if context._is_windows:
         context.env.path.append(context.path(config.INOTIFY_WIN_PATH))
 
+log = Writer(None)
+
+class Channel:
+    def __init__(self):
+        self.q = asyncio.Queue()
+
+    def write(self, data):
+        self.q.put_nowait(data)
+
+    @asyncio.coroutine
+    def read(self):
+        return (yield from self.q.get())
+
 class MySSHClientSession(asyncssh.SSHClientSession):
+    def __init__(self):
+        self.stdout = Channel()
+        self.stderr = Channel()
+        self.exit_queue = asyncio.Queue(1)
+        self.channel = None
+
+    def set_channel(self, channel):
+        self.channel = channel
+
     def data_received(self, data, datatype):
-        status.out('data_received: [%r], datatype: [%r]\n' % (data, datatype))
+        # print('data_received: [%r], datatype: [%r]' % (data, datatype))
+        if datatype == asyncssh.EXTENDED_DATA_STDERR:
+            self.stderr.write(data)
+        else:
+            self.stdout.write(data)
+
+    def eof_received(self):
+        # print('eof_received')
+        self.stdout.write(None)
+        self.stderr.write(None)
+
+    # This doesn't always get called. Maybe a race condition in asyncssh?
+    # def exit_status_received(self, status):
+    #     # print('Got exit status %r' % (status,))
+    #     self.exit_queue.put_nowait(status)
+
+    # def exit_signal_received(signal, core_dumped, msg, lang):
+    #     print('exit_signal_received %r %r %r %r' % (signal, core_dumped, msg, lang))
+
+    # @asyncio.coroutine
+    # def wait_for_exit(self):
+    #     yield from self.exit_queue.get()
+
+    @asyncio.coroutine
+    def wait_for_close(self):
+        yield from self.channel.wait_closed()
 
     def connection_lost(self, exc):
         if exc:
             print('SSH session error: ' + str(exc), file=sys.stderr)
 
+FD_STDOUT = 1
+FD_STDERR = 2
+class LocalSessionReaderProtocol(asyncio.SubprocessProtocol):
+    def __init__(self, session):
+        self.session = session
+        asyncio.SubprocessProtocol.__init__(self)
+
+    def pipe_data_received(self, fd, data):
+        # log.out('got %r from %r\n' % (data, fd))
+        if fd == FD_STDOUT:
+            self.session.stdout.write(data)
+        elif fd == FD_STDERR:
+            self.session.stderr.write(data)
+        asyncio.SubprocessProtocol.pipe_data_received(self, fd, data)
+
+    def pipe_connection_lost(self, fd, exc):
+        self.pipe_data_received(fd, None)
+        if exc:
+            log.out('pipe_connection_lost %r %r\n' % (fd, exc))
+        asyncio.SubprocessProtocol.pipe_connection_lost(self, fd, exc)
+
+    def process_exited(self):
+        # log.out('process exited\n')
+        self.session.exit_queue.put_nowait(None)
+        asyncio.SubprocessProtocol.process_exited(self)
+
+class LocalSession:
+    def __init__(self):
+        self.stdout = Channel()
+        self.stderr = Channel()
+        self.exit_queue = asyncio.Queue(1)
+
+    @asyncio.coroutine
+    def start(self, cmd):
+        loop = asyncio.get_event_loop()
+        self._transport, _ = yield from loop.subprocess_shell(lambda: LocalSessionReaderProtocol(self), cmd, stdin=None)
+        # stdout_reader = LocalSessionReaderProtocol(self.stdout)
+        # yield from loop.connect_read_pipe(lambda: stdout_reader, self.proc.stdout)
+        # stderr_reader = LocalSessionReaderProtocol(self.stderr)
+        # yield from loop.connect_read_pipe(lambda: stderr_reader, self.proc.stderr)
+
+    @asyncio.coroutine
+    def wait_for_close(self):
+        yield from self.exit_queue.get()
+        self._transport.close()
+
 class MySSHClient(asyncssh.SSHClient):
     def connection_made(self, conn):
-        print('Connection made to %s.' % conn.get_extra_info('peername')[0])
+        # print('Connection made to %s.' % conn.get_extra_info('peername')[0])
+        pass
 
     def auth_completed(self):
-        print('Authentication successful.')
-
-class AsyncSshPopen(object):
-    def __init__(self, argv):
-        self.argv = argv
-    def poll(self):
-        raise NotImplementedError()
-    def wait(self):
-        raise NotImplementedError()
-    def close(self):
-        raise NotImplementedError()
-    def kill(self):
-        raise NotImplementedError()
-    terminate = kill
-    def send_signal(self, sig):
-        raise NotImplementedError()
-    def communicate(self):
-        raise NotImplementedError()
-
-class AsyncSshMachine(plumbum.machines.remote.BaseRemoteMachine):
-    def __init__(self, host, user=None, port=None, password=None, keyfile=None,
-                 load_system_host_keys=True, missing_host_policy=None, encoding="utf8",
-                 look_for_keys=None, connect_timeout=None, keep_alive=0):
-        self.host = host
-        self.user = user
-        self.encoding = encoding
-        self.connect_timeout = connect_timeout
-        plumbum.machines.remote.BaseRemoteMachine.__init__(self, self.encoding, self.connect_timeout)
-
-    @asyncio.coroutine
-    def init(self):
-        self._conn, self._client = yield from asyncssh.create_connection(MySSHClient, self.host, username=self.user)
-
-    def session(self, isatty=False, term="vt100", width=80, height=24, new_session=False):
-        proc = AsyncSshPopen(["<shell>"])
-        return plumbum.machines.session.ShellSession(proc, self.encoding, isatty)
-
-    @asyncio.coroutine
-    def popen(self):
-        chan, session = yield from self._conn.create_session(MySSHClientSession, '>&2 echo stderr; sleep 1; echo stdout')
-        yield from chan.wait_closed()
+        # print('Authentication successful.')
+        pass
 
 class SyncContext:
-    REMOTE_CONN = 'asyncssh'
-
     def __init__(self, path=None, host=None, user=None, keyfile=None):
         self.host = host
         self.user = user
         self.path = path
         self.keyfile = keyfile
-
-    @classmethod
-    @asyncio.coroutine
-    def make(cls, *args, **kwargs):
-        me = SyncContext(*args, **kwargs)
-        yield from me.init()
-        return me
+        self._conn = None
+        self._client = None
+        self._name = host or 'localhost'
+        self._name_ansi = '(@host)%s(@r)' % (self._name,)
 
     @asyncio.coroutine
-    def init(self):
-        self.conn = yield from self.make_conn()
+    def make_session(self, cmd):
+        if self.host:
+            if not self._conn:
+                self._conn, self._client = yield from asyncssh.create_connection(MySSHClient, self.host, username=self.user)
+            chan, session = yield from self._conn.create_session(MySSHClientSession, cmd)
+            session.set_channel(chan)
+        else:
+            session = LocalSession()
+            yield from session.start(cmd)
+        return session
+
+    def close(self):
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+            self._client = None
+
+    def __str__(self):
+        return '<Context %s>' % (self._name,)
 
     @asyncio.coroutine
-    def make_conn(self):
-        if not self.host:
-            conn = plumbum.local
-        elif SyncContext.REMOTE_CONN == 'openssl':
-            conn = plumbum.SshMachine(
-                self.host,
-                user=self.user,
-                keyfile=self.keyfile)
-        elif SyncContext.REMOTE_CONN == 'paramiko':
-            # Import paramiko late so that one could use `--use-openssl` without even installing paramiko
-            import paramiko
-            from plumbum.machines.paramiko_machine import ParamikoMachine
-            # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
-            conn = ParamikoMachine(
-                self.host,
-                user=self.user,
-                keyfile=self.keyfile,
-                missing_host_policy=paramiko.AutoAddPolicy())
-        elif SyncContext.REMOTE_CONN == 'asyncssh':
-            conn = AsyncSshMachine(
-                self.host,
-                user=self.user,
-                keyfile=self.keyfile)
-            yield from conn.init()
-        init_context(conn, sync_path=self.path, host=self.host, user=self.user)
-        return conn
+    def __call__(self, args):
+        _, out, _ = yield from self.run(args)
+        return out
 
+    @asyncio.coroutine
+    def run(self, args):
+        return (yield from self.quote(args, quiet_out=True, quiet_err=True))
+
+    @asyncio.coroutine
+    def quote(self, args, quiet_out=False, quiet_err=False):
+        cmd = ' '.join((shlex.quote(arg) for arg in args))
+        session = yield from self.make_session(cmd)
+        name = os.path.basename(args[0])
+        writer_stdout = Writer(self, '(@dim)%s-out' % (name,), muted=quiet_out)
+        writer_stderr = Writer(self, '(@dim)%s-err' % (name,), muted=quiet_err)
+        future_error = writer_stderr.quote_channel(session.stderr)
+        # log.out('reading stdout\n')
+        yield from writer_stdout.quote_channel(session.stdout)
+        yield from future_error
+        # log.out('waiting for chan close\n')
+        yield from session.wait_for_close()
+        # log.out('waiting for exit\n')
+        exit_status = None
+        # exit_status = yield from session.wait_for_exit()
+        # log.out('done with %s\n' % (name,))
+        return (exit_status, writer_stdout.output, writer_stderr.output)
 
 @asyncio.coroutine
 def sync(local_path, remote_user, remote_host, remote_path, keyfile=None):
-    local = yield from SyncContext.make(path=local_path)
-    remote = yield from SyncContext.make(path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
-
-    status = Writer(local.conn, 'gut-sync')
-
-    # session = remote.conn.session()
-    # asyncio.get_event_loop().call_soon(lambda: session.popen('pwd'))
-    # yield from quote_proc(remote.conn, 'test', session.proc)
-
-    # return
-
-    yield from remote.conn['pwd'].run()
+    local = SyncContext(path=local_path)
+    remote = SyncContext(path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
+    try:
 
 
+        # status = Writer(local.conn, 'gut-sync')
 
+        # session = remote.conn.session()
+        # asyncio.get_event_loop().call_soon(lambda: session.popen('pwd'))
+        # yield from quote_proc(remote.conn, 'test', session.proc)
+
+        # return
+        import signal
+        print('signal.SIG_DFL', signal.SIG_DFL)
+        for context in [local]:
+            log.out('Trying %s\n' % (context,))
+            yield from context.quote(['pwd'])
+            # yield from context.quote(['find', '/tmp'])
+            # _, out, err = yield from context.run(['find', '/tmp'])
+            # log.out('Got %s and %s characters from find\n' % (len(out), len(err)))
+            # log.out('find stderr: %r\n' % (err,))
+            # log.out('HELLO = %r\n' % ((yield from context(['echo', 'HELLO'])).strip(),))
+
+    finally:
+        log.out('Cleaning up...\n')
+        local.close()
+        remote.close()
+    log.out('Exiting.\n')
     return
 
     # with (yield from asyncssh.connect(remote_host, username=remote_user)) as conn:
@@ -380,8 +461,8 @@ def main_coroutine():
         def parse_args():
             args = parser.parse_args()
             deps.auto_install = args.install_deps
-            if args.use_openssl:
-                SyncContext.REMOTE_CONN = 'openssl'
+            # if args.use_openssl:
+            #     SyncContext.REMOTE_CONN = 'openssl'
             if args.no_color:
                 term.disable_color()
             return args
@@ -407,7 +488,7 @@ def main_coroutine():
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
             yield from sync(local_path, remote_user, remote_host, remote_path, keyfile=args.identity)
 
-init_context(plumbum.local)
+# init_context(plumbum.local)
 # tick_writer = Writer(plumbum.local, 'tick')
 # @asyncio.coroutine
 # def tick():
@@ -419,12 +500,15 @@ def main():
     try:
         # asyncio.async(tick())
         asyncio.get_event_loop().run_until_complete(main_coroutine())
+        print('exited loop')
     except SystemExit:
         shutdown(exit=False)
         raise
     except KeyboardInterrupt:
         Writer(None).out('\n(@dim)SIGINT received. Shutting down...')
+    print('shut')
     shutdown(exit=False)
+    print('down')
 
 if __name__ == '__main__':
     main()
