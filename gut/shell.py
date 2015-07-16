@@ -2,11 +2,9 @@
 
 import argparse
 import asyncio
-import asyncssh
 import io
 import os
 from queue import Queue
-import shlex
 import sys
 import time
 import traceback
@@ -14,6 +12,7 @@ import traceback
 import plumbum
 from . import patch_plumbum; patch_plumbum.patch()
 
+from . import bismuth
 from . import config
 from . import terminal as term
 from .terminal import shutdown, color_host_path, color_commit, Writer, on_shutdown, quote_proc
@@ -82,215 +81,19 @@ def init_context(context, sync_path=None, host=None, user=None):
 
 log = Writer(None)
 
-class Channel:
-    def __init__(self):
-        self.q = asyncio.Queue()
-
-    def write(self, data):
-        self.q.put_nowait(data)
-
-    @asyncio.coroutine
-    def read(self):
-        return (yield from self.q.get())
-
-class MySSHClientSession(asyncssh.SSHClientSession):
-    def __init__(self):
-        self.stdout = Channel()
-        self.stderr = Channel()
-        self.exit_queue = asyncio.Queue(1)
-        self.channel = None
-
-    def set_channel(self, channel):
-        self.channel = channel
-
-    def data_received(self, data, datatype):
-        # print('data_received: [%r], datatype: [%r]' % (data, datatype))
-        if datatype == asyncssh.EXTENDED_DATA_STDERR:
-            self.stderr.write(data)
-        else:
-            self.stdout.write(data)
-
-    def eof_received(self):
-        # print('eof_received')
-        self.stdout.write(None)
-        self.stderr.write(None)
-
-    # This doesn't always get called. Maybe a race condition in asyncssh?
-    # def exit_status_received(self, status):
-    #     # print('Got exit status %r' % (status,))
-    #     self.exit_queue.put_nowait(status)
-
-    # def exit_signal_received(signal, core_dumped, msg, lang):
-    #     print('exit_signal_received %r %r %r %r' % (signal, core_dumped, msg, lang))
-
-    # @asyncio.coroutine
-    # def wait_for_exit(self):
-    #     yield from self.exit_queue.get()
-
-    @asyncio.coroutine
-    def wait_for_close(self):
-        yield from self.channel.wait_closed()
-
-    def connection_lost(self, exc):
-        if exc:
-            print('SSH session error: ' + str(exc), file=sys.stderr)
-
-FD_STDOUT = 1
-FD_STDERR = 2
-class LocalSessionReaderProtocol(asyncio.SubprocessProtocol):
-    def __init__(self, session):
-        self.session = session
-        asyncio.SubprocessProtocol.__init__(self)
-
-    def pipe_data_received(self, fd, data):
-        # log.out('got %r from %r\n' % (data, fd))
-        if fd == FD_STDOUT:
-            self.session.stdout.write(data)
-        elif fd == FD_STDERR:
-            self.session.stderr.write(data)
-        asyncio.SubprocessProtocol.pipe_data_received(self, fd, data)
-
-    def pipe_connection_lost(self, fd, exc):
-        self.pipe_data_received(fd, None)
-        if exc:
-            log.out('pipe_connection_lost %r %r\n' % (fd, exc))
-        asyncio.SubprocessProtocol.pipe_connection_lost(self, fd, exc)
-
-    def process_exited(self):
-        # log.out('process exited\n')
-        self.session.exit_queue.put_nowait(None)
-        asyncio.SubprocessProtocol.process_exited(self)
-
-class LocalSession:
-    def __init__(self):
-        self.stdout = Channel()
-        self.stderr = Channel()
-        self.exit_queue = asyncio.Queue(1)
-
-    @asyncio.coroutine
-    def start(self, cmd):
-        loop = asyncio.get_event_loop()
-        self._transport, _ = yield from loop.subprocess_shell(lambda: LocalSessionReaderProtocol(self), cmd, stdin=None)
-        # stdout_reader = LocalSessionReaderProtocol(self.stdout)
-        # yield from loop.connect_read_pipe(lambda: stdout_reader, self.proc.stdout)
-        # stderr_reader = LocalSessionReaderProtocol(self.stderr)
-        # yield from loop.connect_read_pipe(lambda: stderr_reader, self.proc.stderr)
-
-    @asyncio.coroutine
-    def wait_for_close(self):
-        yield from self.exit_queue.get()
-        self._transport.close()
-
-class MySSHClient(asyncssh.SSHClient):
-    def connection_made(self, conn):
-        # print('Connection made to %s.' % conn.get_extra_info('peername')[0])
-        pass
-
-    def auth_completed(self):
-        # print('Authentication successful.')
-        pass
-
-class SyncContext:
-    def __init__(self, path=None, host=None, user=None, keyfile=None):
-        self.host = host
-        self.user = user
-        self.path = path
-        self.keyfile = keyfile
-        self._conn = None
-        self._client = None
-        self._name = host or 'localhost'
-        self._name_ansi = '(@host)%s(@r)' % (self._name,)
-
-    @asyncio.coroutine
-    def make_session(self, cmd):
-        if self.host:
-            if not self._conn:
-                self._conn, self._client = yield from asyncssh.create_connection(MySSHClient, self.host, username=self.user)
-            chan, session = yield from self._conn.create_session(MySSHClientSession, cmd)
-            session.set_channel(chan)
-        else:
-            session = LocalSession()
-            yield from session.start(cmd)
-        return session
-
-    def close(self):
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-            self._client = None
-
-    def __str__(self):
-        return '<Context %s>' % (self._name,)
-
-    @asyncio.coroutine
-    def __call__(self, args):
-        _, out, _ = yield from self.run(args)
-        return out
-
-    @asyncio.coroutine
-    def run(self, args):
-        return (yield from self.quote(args, quiet_out=True, quiet_err=True))
-
-    @asyncio.coroutine
-    def quote(self, args, quiet_out=False, quiet_err=False):
-        cmd = ' '.join((shlex.quote(arg) for arg in args))
-        session = yield from self.make_session(cmd)
-        name = os.path.basename(args[0])
-        writer_stdout = Writer(self, '(@dim)%s-out' % (name,), muted=quiet_out)
-        writer_stderr = Writer(self, '(@dim)%s-err' % (name,), muted=quiet_err)
-        future_error = writer_stderr.quote_channel(session.stderr)
-        # log.out('reading stdout\n')
-        yield from writer_stdout.quote_channel(session.stdout)
-        yield from future_error
-        # log.out('waiting for chan close\n')
-        yield from session.wait_for_close()
-        # log.out('waiting for exit\n')
-        exit_status = None
-        # exit_status = yield from session.wait_for_exit()
-        # log.out('done with %s\n' % (name,))
-        return (exit_status, writer_stdout.output, writer_stderr.output)
+class SyncContext(bismuth.Context):
+    def __init__(self, sync_path=None, *args, **kwargs):
+        bismuth.Context.__init__(self, *args, **kwargs)
+        self.sync_path = sync_path
+        self.sync_path_ansi = '(@path)%s(@r)' % (self.sync_path,)
 
 @asyncio.coroutine
 def sync(local_path, remote_user, remote_host, remote_path, keyfile=None):
-    local = SyncContext(path=local_path)
-    remote = SyncContext(path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
-    try:
-
-
-        # status = Writer(local.conn, 'gut-sync')
-
-        # session = remote.conn.session()
-        # asyncio.get_event_loop().call_soon(lambda: session.popen('pwd'))
-        # yield from quote_proc(remote.conn, 'test', session.proc)
-
-        # return
-        import signal
-        print('signal.SIG_DFL', signal.SIG_DFL)
-        for context in [local]:
-            log.out('Trying %s\n' % (context,))
-            yield from context.quote(['pwd'])
-            # yield from context.quote(['find', '/tmp'])
-            # _, out, err = yield from context.run(['find', '/tmp'])
-            # log.out('Got %s and %s characters from find\n' % (len(out), len(err)))
-            # log.out('find stderr: %r\n' % (err,))
-            # log.out('HELLO = %r\n' % ((yield from context(['echo', 'HELLO'])).strip(),))
-
-    finally:
-        log.out('Cleaning up...\n')
-        local.close()
-        remote.close()
-    log.out('Exiting.\n')
-    return
-
-    # with (yield from asyncssh.connect(remote_host, username=remote_user)) as conn:
-    #     stdin, stdout, stderr = yield from conn.open_session('pwd')
-    #     asyncio.async(Writer(remote, 'out').quote_fd(stdout))
-    #     yield from Writer(remote, 'out').quote_fd(stderr)
-
-    yield from quote_proc(remote.conn, 'test', remote.conn['pwd'].popen())
+    local = SyncContext(sync_path=local_path)
+    remote = SyncContext(sync_path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
 
     return
-    status.out('(@dim)Syncing ' + local._sync_path + ' (@dim)with ' + remote._sync_path + '\n')
+    status.out('(@dim)Syncing ' + local.sync_path_ansi + ' (@dim)with ' + remote.sync_path_ansi + '\n')
 
     ports = util.find_open_ports([local, remote], 3)
     # out(dim('Using ports ') + dim(', ').join([unicode(port) for port in ports]) +'\n')
@@ -500,15 +303,12 @@ def main():
     try:
         # asyncio.async(tick())
         asyncio.get_event_loop().run_until_complete(main_coroutine())
-        print('exited loop')
     except SystemExit:
         shutdown(exit=False)
         raise
     except KeyboardInterrupt:
         Writer(None).out('\n(@dim)SIGINT received. Shutting down...')
-    print('shut')
     shutdown(exit=False)
-    print('down')
 
 if __name__ == '__main__':
     main()

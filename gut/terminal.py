@@ -103,6 +103,7 @@ def shutdown(exit=True):
         loop.call_soon(lambda: asyncio.get_event_loop().stop())
         if not loop.is_running():
             loop.run_forever()
+        loop.close()
     except KeyboardInterrupt:
         pass
     if exit:
