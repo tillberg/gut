@@ -297,42 +297,38 @@ class Writer:
                 self.out('(@error) *** gut repo by moving unused files to another folder.\n')
 
     @asyncio.coroutine
-    def quote_fd(self, fd, block=False):
-        @asyncio.coroutine
-        def run():
-            try:
-                eof_queue = asyncio.Queue()
-                @asyncio.coroutine
-                def eof():
-                    yield from eof_queue.put(True)
-                class MyReaderProtocol(asyncio.Protocol):
-                    def data_received(_self, data):
-                        # print('[' + data.decode() + ']\n')
-                        self._out(data.decode()) # XXX it isn't really safe to decode multibyte stuff here
-                    def eof_received(_self):
-                        self.out('\n')
-                        asyncio.async(eof())
-                reader_protocol = MyReaderProtocol()
-                yield from asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, fd)
-                yield from eof_queue.get()
-            except Exception as ex:
-                if not shutting_down:
-                    raise
-        if block:
-            yield from run()
-        else:
-            asyncio.async(run())
+    def quote_fd(self, fd):
+        try:
+            eof_queue = asyncio.Queue()
+            @asyncio.coroutine
+            def eof():
+                yield from eof_queue.put(True)
+            class MyReaderProtocol(asyncio.Protocol):
+                def data_received(_self, data):
+                    print('data received [' + data.decode() + ']')
+                    self._out(data.decode()) # XXX it isn't really safe to decode multibyte stuff here
+                def eof_received(_self):
+                    self.out('\n')
+                    asyncio.async(eof())
+            reader_protocol = MyReaderProtocol()
+            yield from asyncio.get_event_loop().connect_read_pipe(lambda: reader_protocol, fd)
+            print('waiting for eof')
+            yield from eof_queue.get()
+            print('got eof')
+        except Exception as ex:
+            if not shutting_down:
+                raise
 
 @asyncio.coroutine
 def quote_proc(context, name, proc, quiet_out=False, quiet_err=False, wait=True):
     writer_stdout = Writer(context, name + '(@dim)-out', muted=quiet_out)
     writer_stderr = Writer(context, name + '(@dim)-err', muted=quiet_err)
-    asyncio.async(writer_stderr.quote_fd(proc.stderr))
+    asyncio.async(writer_stderr.quote_fd(proc.stderr.channel))
     if wait:
-        yield from writer_stdout.quote_fd(proc.stdout, block=True)
+        yield from writer_stdout.quote_fd(proc.stdout.channel)
         return (proc.returncode, writer_stdout.output, writer_stderr.output)
     else:
-        asyncio.async(writer_stdout.quote_fd(proc.stdout))
+        asyncio.async(writer_stdout.quote_fd(proc.stdout.channel))
 
 def quote(context, name, text):
     Writer(context, name).out(text)

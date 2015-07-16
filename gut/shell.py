@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import asyncssh
 import os
 from queue import Queue
 import sys
@@ -13,7 +14,7 @@ from . import patch_plumbum; patch_plumbum.patch()
 
 from . import config
 from . import terminal as term
-from .terminal import shutdown, color_host_path, color_commit, Writer, on_shutdown
+from .terminal import shutdown, color_host_path, color_commit, Writer, on_shutdown, quote_proc
 from . import deps
 from . import gut_cmd
 from . import gut_build
@@ -77,27 +78,137 @@ def init_context(context, sync_path=None, host=None, user=None):
     if context._is_windows:
         context.env.path.append(context.path(config.INOTIFY_WIN_PATH))
 
-@asyncio.coroutine
-def sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=False, keyfile=None):
-    status = Writer(local, 'gut-sync')
-    if use_openssl:
-        remote = plumbum.SshMachine(
-            remote_host,
-            user=remote_user,
-            keyfile=keyfile)
-    else:
-        # Import paramiko late so that one could use `--use-openssl` without even installing paramiko
-        import paramiko
-        from plumbum.machines.paramiko_machine import ParamikoMachine
-        # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
-        remote = ParamikoMachine(
-            remote_host,
-            user=remote_user,
-            keyfile=keyfile,
-            missing_host_policy=paramiko.AutoAddPolicy())
-    init_context(local, sync_path=local_path)
-    init_context(remote, sync_path=remote_path, host=remote_host, user=remote_user)
+class MySSHClientSession(asyncssh.SSHClientSession):
+    def data_received(self, data, datatype):
+        status.out('data_received: [%r], datatype: [%r]\n' % (data, datatype))
 
+    def connection_lost(self, exc):
+        if exc:
+            print('SSH session error: ' + str(exc), file=sys.stderr)
+
+class MySSHClient(asyncssh.SSHClient):
+    def connection_made(self, conn):
+        print('Connection made to %s.' % conn.get_extra_info('peername')[0])
+
+    def auth_completed(self):
+        print('Authentication successful.')
+
+class AsyncSshPopen(object):
+    def __init__(self, argv):
+        self.argv = argv
+    def poll(self):
+        raise NotImplementedError()
+    def wait(self):
+        raise NotImplementedError()
+    def close(self):
+        raise NotImplementedError()
+    def kill(self):
+        raise NotImplementedError()
+    terminate = kill
+    def send_signal(self, sig):
+        raise NotImplementedError()
+    def communicate(self):
+        raise NotImplementedError()
+
+class AsyncSshMachine(plumbum.machines.remote.BaseRemoteMachine):
+    def __init__(self, host, user=None, port=None, password=None, keyfile=None,
+                 load_system_host_keys=True, missing_host_policy=None, encoding="utf8",
+                 look_for_keys=None, connect_timeout=None, keep_alive=0):
+        self.host = host
+        self.user = user
+        self.encoding = encoding
+        self.connect_timeout = connect_timeout
+        plumbum.machines.remote.BaseRemoteMachine.__init__(self, self.encoding, self.connect_timeout)
+
+    @asyncio.coroutine
+    def init(self):
+        self._conn, self._client = yield from asyncssh.create_connection(MySSHClient, self.host, username=self.user)
+
+    def session(self, isatty=False, term="vt100", width=80, height=24, new_session=False):
+        proc = AsyncSshPopen(["<shell>"])
+        return plumbum.machines.session.ShellSession(proc, self.encoding, isatty)
+
+    @asyncio.coroutine
+    def popen(self):
+        chan, session = yield from self._conn.create_session(MySSHClientSession, '>&2 echo stderr; sleep 1; echo stdout')
+        yield from chan.wait_closed()
+
+class SyncContext:
+    REMOTE_CONN = 'asyncssh'
+
+    def __init__(self, path=None, host=None, user=None, keyfile=None):
+        self.host = host
+        self.user = user
+        self.path = path
+        self.keyfile = keyfile
+
+    @classmethod
+    @asyncio.coroutine
+    def make(cls, *args, **kwargs):
+        me = SyncContext(*args, **kwargs)
+        yield from me.init()
+        return me
+
+    @asyncio.coroutine
+    def init(self):
+        self.conn = yield from self.make_conn()
+
+    @asyncio.coroutine
+    def make_conn(self):
+        if not self.host:
+            conn = plumbum.local
+        elif SyncContext.REMOTE_CONN == 'openssl':
+            conn = plumbum.SshMachine(
+                self.host,
+                user=self.user,
+                keyfile=self.keyfile)
+        elif SyncContext.REMOTE_CONN == 'paramiko':
+            # Import paramiko late so that one could use `--use-openssl` without even installing paramiko
+            import paramiko
+            from plumbum.machines.paramiko_machine import ParamikoMachine
+            # XXX paramiko doesn't seem to successfully update my known_hosts file with this setting
+            conn = ParamikoMachine(
+                self.host,
+                user=self.user,
+                keyfile=self.keyfile,
+                missing_host_policy=paramiko.AutoAddPolicy())
+        elif SyncContext.REMOTE_CONN == 'asyncssh':
+            conn = AsyncSshMachine(
+                self.host,
+                user=self.user,
+                keyfile=self.keyfile)
+            yield from conn.init()
+        init_context(conn, sync_path=self.path, host=self.host, user=self.user)
+        return conn
+
+
+@asyncio.coroutine
+def sync(local_path, remote_user, remote_host, remote_path, keyfile=None):
+    local = yield from SyncContext.make(path=local_path)
+    remote = yield from SyncContext.make(path=remote_path, host=remote_host, user=remote_user, keyfile=keyfile)
+
+    status = Writer(local.conn, 'gut-sync')
+
+    # session = remote.conn.session()
+    # asyncio.get_event_loop().call_soon(lambda: session.popen('pwd'))
+    # yield from quote_proc(remote.conn, 'test', session.proc)
+
+    # return
+
+    yield from remote.conn['pwd'].run()
+
+
+
+    return
+
+    # with (yield from asyncssh.connect(remote_host, username=remote_user)) as conn:
+    #     stdin, stdout, stderr = yield from conn.open_session('pwd')
+    #     asyncio.async(Writer(remote, 'out').quote_fd(stdout))
+    #     yield from Writer(remote, 'out').quote_fd(stderr)
+
+    yield from quote_proc(remote.conn, 'test', remote.conn['pwd'].popen())
+
+    return
     status.out('(@dim)Syncing ' + local._sync_path + ' (@dim)with ' + remote._sync_path + '\n')
 
     ports = util.find_open_ports([local, remote], 3)
@@ -261,26 +372,28 @@ def main_coroutine():
             import pkg_resources
             print('gut-sync version %s' % (pkg_resources.require("gut")[0].version,))
             return
-        local = plumbum.local
-        init_context(local)
         parser = argparse.ArgumentParser()
         parser.add_argument('action', choices=['build', 'sync'])
         parser.add_argument('--install-deps', action='store_true')
         parser.add_argument('--no-color', action='store_true')
+        parser.add_argument('--use-openssl', action='store_true')
         def parse_args():
             args = parser.parse_args()
             deps.auto_install = args.install_deps
+            if args.use_openssl:
+                SyncContext.REMOTE_CONN = 'openssl'
             if args.no_color:
                 term.disable_color()
             return args
         if action == 'build':
             args = parser.parse_args()
+            local = plumbum.local
+            init_context(local)
             if not (yield from ensure_build(local)):
                 status.out('(@dim)gut ' + config.GIT_VERSION + '(@dim) has already been built.\n')
         else:
             parser.add_argument('local')
             parser.add_argument('remote')
-            parser.add_argument('--use-openssl', action='store_true')
             parser.add_argument('--identity', '-i')
             parser.add_argument('--dev', action='store_true')
             # parser.add_argument('--verbose', '-v', action='count')
@@ -292,7 +405,7 @@ def main_coroutine():
                 asyncio.async(util.restart_on_change(os.path.abspath(__file__)))
             remote_addr, remote_path = args.remote.split(':', 1)
             remote_user, remote_host = remote_addr.rsplit('@', 2) if '@' in remote_addr else (None, remote_addr)
-            yield from sync(local, local_path, remote_user, remote_host, remote_path, use_openssl=args.use_openssl, keyfile=args.identity)
+            yield from sync(local_path, remote_user, remote_host, remote_path, keyfile=args.identity)
 
 init_context(plumbum.local)
 # tick_writer = Writer(plumbum.local, 'tick')
