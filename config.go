@@ -192,9 +192,12 @@ var AllGutCommands = [...]string{
     "verify-commit",
     "verify-pack",
     "verify-tag",
-    "version", // This is an extra/special built-in (an alias for --version, I presume):
     "whatchanged",
     "write-tree",
+
+    // This is an extra/special built-in (an alias for --version, I presume):
+    "version",
+    "--version",
 }
 
 func IsGitCommand(s string) bool {
