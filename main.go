@@ -4,13 +4,12 @@ import (
     // "bytes"
     // "code.google.com/p/go.crypto/ssh"
     "fmt"
-    "log"
     // "io"
     // "io/ioutil"
     "os"
     "syscall"
-    // "time"
     "github.com/jessevdk/go-flags"
+    "github.com/tillberg/ansi-log"
 )
 
 var OptsCommon struct {
@@ -32,7 +31,7 @@ var OptsSync struct {
 func main() {
     var args []string = os.Args[1:]
     if len(args) == 0 {
-        log.Fatal("You must specify a gut-command, e.g. `gut sync ...`")
+        log.Fatalln("You must specify a gut-command, e.g. `gut sync ...`")
     }
     var cmd = args[0]
     args = args[1:]
@@ -49,7 +48,10 @@ func main() {
         os.Exit(0)
     }
     if cmd == "build" {
-
+        // var local = SyncContext(nil, nil)
+        // if !EnsureBuild(local) {
+        //     log.Printf("(@dim)gut " + GitVersion + "(@dim) has already been built.\n")
+        // }
     } else if cmd == "sync" {
         var _, err = flags.ParseArgs(&OptsSync, argsRemaining)
         if err != nil { log.Fatal(err) }
@@ -57,8 +59,4 @@ func main() {
         fmt.Printf("local path: %s\n", OptsSync.Positional.LocalPath)
         fmt.Printf("remote path: %s\n", OptsSync.Positional.RemotePath)
     }
-    // fmt.Printf("")
-
-    // fmt.Printf("the first positional arg is %s\n", flag.Arg(0))
-    // var installDeps = flag.Bool("install-deps", false)
 }
