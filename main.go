@@ -1,11 +1,7 @@
 package main
 
 import (
-    // "bytes"
-    // "code.google.com/p/go.crypto/ssh"
     "fmt"
-    // "io"
-    // "io/ioutil"
     "os"
     "syscall"
     "github.com/jessevdk/go-flags"
@@ -28,6 +24,14 @@ var OptsSync struct {
     } `positional-args:"yes" required:"yes"`
 }
 
+func doSession(ctx *SyncContext, done chan bool) {
+    err := ctx.RunShell("echo -n 'working... '; sleep 0.1; echo done.") //"/usr/bin/whoami"
+    if err != nil {
+        log.Fatalf("unable to connect: %s", err)
+    }
+    done <- true
+}
+
 func main() {
     var args []string = os.Args[1:]
     if len(args) == 0 {
@@ -48,7 +52,7 @@ func main() {
         os.Exit(0)
     }
     if cmd == "build" {
-        // var local = SyncContext(nil, nil)
+        // var local = NewSyncContext()
         // if !EnsureBuild(local) {
         //     log.Printf("(@dim)gut " + GitVersion + "(@dim) has already been built.\n")
         // }
@@ -56,7 +60,24 @@ func main() {
         var _, err = flags.ParseArgs(&OptsSync, argsRemaining)
         if err != nil { log.Fatal(err) }
 
-        fmt.Printf("local path: %s\n", OptsSync.Positional.LocalPath)
-        fmt.Printf("remote path: %s\n", OptsSync.Positional.RemotePath)
+        local := NewSyncContext()
+        err = local.ParseSyncPath(OptsSync.Positional.LocalPath)
+        if err != nil { log.Fatalln(err) }
+        remote := NewSyncContext()
+        err = remote.ParseSyncPath(OptsSync.Positional.RemotePath)
+        if err != nil { log.Fatalln(err) }
+        fmt.Printf("local: %s\n", local)
+        fmt.Printf("remote: %s\n", remote)
+
+        log.EnableMultilineMode()
+        done := make(chan bool)
+        num := 10
+        for i := 0; i < num; i++ {
+            go doSession(remote, done)
+        }
+        for i := 0; i < num; i++ {
+            <-done
+        }
     }
+
 }
