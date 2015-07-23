@@ -49,21 +49,24 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
     if err != nil { return false, err }
     err = GutBuildPrepare(local, ctx)
     if err != nil { return false, err }
-
-    //     yield from gut_build.prepare(context)
-    //     if context != plumbum.local:
-    //         # If we're building remotely, rsync the prepared source to the remote host
-    //         build_path = config.GUT_SRC_TMP_PATH
-    //         yield from util.rsync(plumbum.local, config.GUT_SRC_PATH, context, build_path, excludes=['.git', 't'])
-    //     else:
-    //         build_path = config.GUT_WIN_SRC_PATH if context._is_windows else config.GUT_SRC_PATH
-    //     yield from gut_build.build(context, build_path)
-    //     status.out('(@dim)Cleaning up...(@r)')
-    //     yield from gut_build.unprepare(context)
-    //     if context != plumbum.local:
-    //         context['rm']['-r', context.path(config.GUT_SRC_TMP_PATH)]()
-    //     status.out('(@dim) done.(@r)\n')
-    //     return True
+    var buildPath string
+    if ctx.IsLocal() {
+        if ctx.IsWindows() {
+            buildPath = GutWinSrcPath
+        } else {
+            buildPath = GutSrcPath
+        }
+    } else {
+        buildPath = GutSrcTmpPath
+        err = ctx.UploadRecursiveExcludes(GutSrcPath, buildPath, []string{".git", "t"})
+        if err != nil { return false, err }
+    }
+    err = GutBuild(ctx, buildPath)
+    if err != nil { return false, err }
+    status.Printf("@(dim:Cleaning up...)")
+    err = GutUnprepare(local, ctx)
+    if err != nil { return false, err }
+    status.Printf("@(dim: done.)\n")
     return true, nil
 }
 

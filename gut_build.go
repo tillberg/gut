@@ -7,6 +7,7 @@ import (
     "path"
     "strings"
     "unicode/utf8"
+    "github.com/kballard/go-shellquote"
 )
 
 func EnsureGutFolders(ctx *SyncContext) (err error) {
@@ -141,4 +142,81 @@ func GutBuildPrepare(local *SyncContext, ctx *SyncContext) (err error) {
         err = RewriteGitToGut(local, GutSrcPath)
     }
     return err
+}
+
+func windowsPathToMingwPath(p string) string {
+    // XXX path/filepath might be better for this sort of thing
+    p = strings.Replace(p, ":", "", 1)
+    p = strings.Replace(p, "\\", "/", -1)
+    return "/" + p
+}
+
+const defaultNumCores = "4"
+func getNumCores(ctx *SyncContext) string {
+    if ctx.IsWindows() {
+        out, err := ctx.Output("wmic", "CPU", "Get", "NumberOfLogicalProcessors", "/Format:List")
+        if err != nil { return defaultNumCores }
+        out = strings.TrimSpace(out)
+        parts := strings.Split(out, "=")
+        return parts[len(parts) - 1]
+    } else {
+        out, err := ctx.Output("getconf", "_NPROCESSORS_ONLN")
+        if err != nil { return defaultNumCores }
+        return strings.TrimSpace(out)
+    }
+}
+
+func GutBuild(ctx *SyncContext, buildPath string) (err error) {
+    buildPath = ctx.AbsPath(buildPath)
+    gutDistPath := ctx.AbsPath(GutDistPath)
+    var installPrefix string
+    if ctx.IsWindows() {
+        installPrefix = "prefix=" + windowsPathToMingwPath(gutDistPath)
+    } else {
+        installPrefix = "prefix=" + gutDistPath
+    }
+    status := ctx.NewLogger("build")
+    defer status.Close()
+    doMake := func(name string, args ...string) (_err error) {
+        if ctx.IsWindows() {
+            makePath := ctx.AbsPath(path.Join(MsysgitPath, "bin/make.exe"))
+            cdCmd := shellquote.Join("cd", buildPath)
+            makeCmd := "PATH=/bin:/mingw/bin NO_GETTEXT=1 " + shellquote.Join(append([]string{makePath}, args...)...)
+            _err = ctx.QuoteShell("make-" + name, cdCmd + " && " + makeCmd)
+        } else {
+            _err = ctx.QuoteCwd("make-" + name, buildPath, append([]string{"make"}, args...)...)
+        }
+        return _err
+    }
+    if !ctx.IsWindows() {
+        status.Printf("@(dim:Configuring Makefile for gut...)\n")
+        err = doMake("configure", installPrefix, "configure")
+        if err != nil { return err }
+        err = ctx.QuoteCwd("autoconf", buildPath, ctx.AbsPath(path.Join(buildPath, "configure")), installPrefix)
+        if err != nil { return err }
+    }
+    parallelism := getNumCores(ctx)
+    status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)", parallelism)
+    err = doMake("build", installPrefix, "-j", parallelism)
+    if err != nil { return err }
+    status.Printf("@(dim: done.)\n")
+    status.Printf("@(dim:Installing gut to) @(path:%s)@(dim:...)", gutDistPath)
+    err = doMake("install", installPrefix, "install")
+    if err != nil { return err }
+    status.Printf("@(dim: done.)\n")
+    return nil
+}
+
+func GutUnprepare(local *SyncContext, ctx *SyncContext) (err error) {
+    if ctx.IsWindows() {
+        GitHardResetAndClean(local, MsysgitPath, MsysgitRepoUrl, MsysgitVersion)
+        GitHardResetAndClean(local, GutWinSrcPath, GitWinRepoUrl, GitWinVersion)
+    } else {
+        GitHardResetAndClean(local, GutSrcPath, GitRepoUrl, GitVersion)
+    }
+    if !ctx.IsLocal() {
+        err = ctx.Quote("cleanup", "rm", "-r", ctx.AbsPath(GutSrcTmpPath))
+        if err != nil { return err }
+    }
+    return nil
 }
