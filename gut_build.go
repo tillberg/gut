@@ -2,8 +2,11 @@ package main
 
 import (
     "errors"
+    "io/ioutil"
+    "os"
     "path"
     "strings"
+    "unicode/utf8"
 )
 
 func EnsureGutFolders(ctx *SyncContext) (err error) {
@@ -15,11 +18,68 @@ func EnsureGutFolders(ctx *SyncContext) (err error) {
     return err
 }
 
+func renameGitToGut(s string) string {
+    s = strings.Replace(s, "git", "gut", -1)
+    s = strings.Replace(s, "Git", "Gut", -1)
+    s = strings.Replace(s, "GIT", "GUT", -1)
+    s = strings.Replace(s, "digut", "digit", -1)
+    s = strings.Replace(s, "DIGUT", "DIGIT", -1)
+    return s
+}
+
+func rewriteGitToGutRecursive(pathRoot string) (err error) {
+    entries, err := ioutil.ReadDir(pathRoot)
+    if err != nil { return err }
+    for _, entry := range entries {
+        origName := entry.Name()
+        // Don't modify .gitignore, and don't recurse into .git
+        if len(origName) >= 4 && origName[:4] == ".git" { continue }
+        name := renameGitToGut(origName)
+        p := path.Join(pathRoot, name)
+        if (origName != name) {
+            os.Rename(path.Join(pathRoot, origName), p)
+        }
+        if entry.IsDir() {
+            err = rewriteGitToGutRecursive(p)
+            if err != nil { return err }
+        } else {
+            _origContents, err := ioutil.ReadFile(p)
+            if err != nil { return err }
+            if !utf8.Valid(_origContents) {
+                continue
+            }
+            origContents := string(_origContents)
+            contents := renameGitToGut(origContents)
+            if name == "read-cache.c" {
+                // This is a special case super-optimized string parse for the 'i' in 'git':
+                contents = strings.Replace(contents, "rest[1] != 'i' && rest[1] != 'I'", "rest[1] != 'u' && rest[1] != 'U'", -1)
+            }
+            if name == "utf8.c" {
+                contents = strings.Replace(contents, "if (c != 'i' && c != 'I'", "if (c != 'u' && c != 'U'", -1)
+            }
+            if name == "GUT-VERSION-GEN" {
+                // GUT-VERSION-GEN attempts to use `git` to look at the git repo's history in order to determine the version string.
+                // This prevents gut-gui/GUT-VERSION-GEN from calling `gut` and causing `gut_proxy` to recursively build `gut` in an infinite loop.
+                contents = strings.Replace(contents, "gut ", "git ", -1)
+            }
+            if origContents != contents {
+                err = ioutil.WriteFile(p, []byte(contents), os.FileMode(0644))
+                if err != nil { return err }
+            }
+        }
+    }
+    return nil
+}
+
 func RewriteGitToGut(local *SyncContext, pathRoot string) (err error) {
     status := local.NewLogger("rewrite")
     defer status.Close()
     status.Printf("@(dim:Rewriting git to gut...)")
-
+    err = rewriteGitToGutRecursive(local.AbsPath(pathRoot))
+    if err != nil {
+        status.Printf("@(error: failed)@(dim:.)\n")
+        return err
+    }
     status.Printf("@(dim: done.)\n")
     return nil
 }
@@ -33,7 +93,7 @@ func GitHardResetAndClean(local *SyncContext, localPath string, repoUrl string, 
     }
     err = local.QuoteCwd("git-reset", localPath, "git", "reset", "--quiet", "--hard", version)
     if err != nil { return err }
-    err = local.QuoteCwd("git-clean", localPath, "git", "clean", "-fdx")
+    err = local.QuoteCwd("git-clean", localPath, "git", "clean", "-fdxq")
     return err
 }
 
