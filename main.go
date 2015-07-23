@@ -3,6 +3,7 @@ package main
 import (
     "fmt"
     "os"
+    "strings"
     "syscall"
     "github.com/jessevdk/go-flags"
     "github.com/tillberg/ansi-log"
@@ -24,16 +25,31 @@ var OptsSync struct {
     } `positional-args:"yes" required:"yes"`
 }
 
-func EnsureBuild(ctx *SyncContext) (bool, error) {
+func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err error) {
     status := ctx.Logger()
     desiredGitVersion := GitVersion
     if ctx.IsWindows() {
         desiredGitVersion = GitWinVersion
     }
     status.Printf("@(dim:We want git version) %s\n", desiredGitVersion)
-    // if not gut_cmd.exe_path(context).exists() or desired_git_version.lstrip('v') not in gut_cmd.get_version(context):
-    //     status.out('(@dim)Need to build gut on ' + context._name_ansi + '(@dim).(@r)\n')
-    //     gut_build.ensure_gut_folders(context)
+    exists, err := ctx.PathExists(GutExePath)
+    if err != nil { return false, err }
+    if exists {
+        status.Printf("We have it\n")
+        return false, nil
+        actualGutVersion, err := ctx.Output(ctx.AbsPath(GutExePath), "--version")
+        if err != nil { return false, err }
+        if strings.Contains(strings.TrimLeft(desiredGitVersion, "v"), string(actualGutVersion)) {
+            status.Printf("We have the right version\n")
+            return false, nil
+        }
+    }
+    status.Printf("@(dim:Need to build gut on) %s@(dim:.)\n", ctx.NameAnsi())
+    err = EnsureGutFolders(ctx)
+    if err != nil { return false, err }
+    err = GutBuildPrepare(local, ctx)
+    if err != nil { return false, err }
+
     //     yield from gut_build.prepare(context)
     //     if context != plumbum.local:
     //         # If we're building remotely, rsync the prepared source to the remote host
@@ -48,11 +64,11 @@ func EnsureBuild(ctx *SyncContext) (bool, error) {
     //         context['rm']['-r', context.path(config.GUT_SRC_TMP_PATH)]()
     //     status.out('(@dim) done.(@r)\n')
     //     return True
-    return false, nil
+    return true, nil
 }
 
 func doSession(ctx *SyncContext, done chan bool) {
-    err := ctx.RunShell("echo -n 'working... '; sleep 0.01; hostname")
+    err := ctx.QuoteShell("test", "echo -n 'working... '; sleep 0.01; hostname")
     if err != nil {
         log.Fatalf("unable to connect: %s", err)
     }
@@ -62,8 +78,6 @@ func doSession(ctx *SyncContext, done chan bool) {
 func main() {
     log.EnableMultilineMode()
     log.EnableColorTemplate()
-    log.AddAnsiColorCode("host", 33)
-    log.AddAnsiColorCode("path", 36)
     log.AddAnsiColorCode("error", 31)
     log.AddAnsiColorCode("commit", 32)
     status := log.New(os.Stderr, "", 0)
@@ -87,8 +101,9 @@ func main() {
     }
     if cmd == "build" {
         var local = NewSyncContext()
-        local.Connect()
-        didSomething, err := EnsureBuild(local)
+        err := local.Connect()
+        if err != nil { status.Fatal(err) }
+        didSomething, err := EnsureBuild(local, local)
         if err != nil { status.Fatal(err) }
         if !didSomething {
             status.Printf("@(dim:gut) " + GitVersion + " @(dim:has already been built.)\n")
