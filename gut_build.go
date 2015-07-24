@@ -10,12 +10,17 @@ import (
     "github.com/kballard/go-shellquote"
 )
 
+func Mkdirp(ctx *SyncContext, p string) (err error) {
+    _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(p))
+    return err
+}
+
 func EnsureGutFolders(ctx *SyncContext) (err error) {
-    _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(GutSrcPath))
+    err = Mkdirp(ctx, GutSrcPath)
     if err != nil { return err }
-    _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(GutWinSrcPath))
+    err = Mkdirp(ctx, GutWinSrcPath)
     if err != nil { return err }
-    _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(GutDistPath))
+    err = Mkdirp(ctx, GutDistPath)
     return err
 }
 
@@ -196,14 +201,14 @@ func GutBuild(ctx *SyncContext, buildPath string) (err error) {
         if err != nil { return err }
     }
     parallelism := getNumCores(ctx)
-    status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)", parallelism)
+    status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)\n", parallelism)
     err = doMake("build", installPrefix, "-j", parallelism)
     if err != nil { return err }
-    status.Printf("@(dim: done.)\n")
-    status.Printf("@(dim:Installing gut to) @(path:%s)@(dim:...)", gutDistPath)
+    status.Printf("@(dim:Finished building gut.)\n")
+    status.Printf("@(dim:Installing gut to) @(path:%s)@(dim:...)\n", gutDistPath)
     err = doMake("install", installPrefix, "install")
     if err != nil { return err }
-    status.Printf("@(dim: done.)\n")
+    status.Printf("@(dim:Finished installing gut to) @(path:%s)@(dim:.)\n", gutDistPath)
     return nil
 }
 

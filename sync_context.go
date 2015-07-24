@@ -8,13 +8,14 @@ import (
 )
 
 type SyncContext struct {
-    bismuth.ExecContext
+    *bismuth.ExecContext
 
     syncPath string
 }
 
 func NewSyncContext() *SyncContext {
     ctx := &SyncContext{}
+    ctx.ExecContext = &bismuth.ExecContext{}
     ctx.Init()
     return ctx
 }
@@ -41,4 +42,15 @@ func (ctx *SyncContext) String() string {
         return fmt.Sprintf("{SyncContext %s@%s:%s}", ctx.Username(), ctx.Hostname(), ctx.syncPath)
     }
     return fmt.Sprintf("{SyncContext local %s}", ctx.syncPath)
+}
+
+func (ctx *SyncContext) PathAnsi(p string) string {
+    if !ctx.IsLocal() {
+        return fmt.Sprintf(ctx.Logger().Colorify("%s@(dim::)@(path:%s)"), ctx.NameAnsi(), p)
+    }
+    return fmt.Sprintf(ctx.Logger().Colorify("@(path:%s)"), p)
+}
+
+func (ctx *SyncContext) SyncPathAnsi() string {
+    return ctx.PathAnsi(ctx.syncPath)
 }
