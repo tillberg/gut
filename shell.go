@@ -1,10 +1,13 @@
 package main
 
 import (
+    "errors"
+    "fmt"
     "io"
     "os"
     "strings"
     "syscall"
+    "time"
     "github.com/jessevdk/go-flags"
     "github.com/tillberg/ansi-log"
 )
@@ -86,6 +89,7 @@ func doSession(ctx *SyncContext, done chan bool) {
     done <- true
 }
 
+const commitDebounceDuration = 100 * time.Millisecond
 func Sync(local *SyncContext, remote *SyncContext) (err error) {
     status := local.NewLogger("sync")
     defer status.Close()
@@ -99,148 +103,183 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     ports, err := FindOpenPorts(3, local, remote)
     if err != nil { return err }
     // status.Printf("Using ports %v\n", ports)
+    gutdBindPort := ports[0]
+    gutdConnectPort := ports[1]
+    autosshMonitorPort := ports[2]
 
-    // ports = util.find_open_ports([local, remote], 3)
-    // # out(dim('Using ports ') + dim(', ').join([unicode(port) for port in ports]) +'\n')
-    // gutd_bind_port, gutd_connect_port, autossh_monitor_port = ports
+    go StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
 
-    // local_tail_hash = get_tail_hash(local, local_path)
-    // remote_tail_hash = get_tail_hash(remote, remote_path)
-    // tail_hash = None
+    localTailHash := GetTailHash(local)
+    remoteTailHash := GetTailHash(remote)
+    tailHash := ""
 
-    // yield from util.start_ssh_tunnel(local, remote, gutd_bind_port, gutd_connect_port, autossh_monitor_port)
+    startGutDaemon := func(ctx *SyncContext) error { return GutDaemon(ctx, tailHash, gutdBindPort) }
+    setupGutOrigin := func(ctx *SyncContext) error { return GutSetupOrigin(ctx, tailHash, gutdConnectPort) }
+    crossInit := func(src *SyncContext, dest *SyncContext) (err error) {
+        err = startGutDaemon(src)
+        if err != nil { return err }
+        err = GutInit(dest)
+        if err != nil { return err }
+        err = setupGutOrigin(dest)
+        if err != nil { return err }
+        time.Sleep(2) // Give the gut-daemon and SSH tunnel a moment to start up
+        err = GutPull(dest)
+        if err != nil { return err }
+        err = startGutDaemon(dest)
+        return err
+    }
 
-    // @asyncio.coroutine
-    // def cross_init(src_context, src_path, dest_context, dest_path):
-    //     yield from gut_cmd.daemon(src_context, src_path, tail_hash, gutd_bind_port)
-    //     yield from gut_cmd.init(dest_context, dest_path)
-    //     gut_cmd.setup_origin(dest_context, dest_path, tail_hash, gutd_connect_port)
-    //     import time
-    //     time.sleep(2) # Give the gut-daemon and SSH tunnel a moment to start up
-    //     yield from gut_cmd.pull(dest_context, dest_path)
-    //     yield from gut_cmd.daemon(dest_context, dest_path, tail_hash, gutd_bind_port)
+    if localTailHash == "" || localTailHash != remoteTailHash {
+        status.Printf("@(dim:Local gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(localTailHash))
+        status.Printf("@(dim:Remote gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(remoteTailHash))
+        if localTailHash != "" && remoteTailHash == "" {
+            tailHash = localTailHash
+            err = AssertSyncFolderIsEmpty(remote)
+            if err != nil { return err }
+            status.Printf("@(dim)Initializing remote repo from local repo...\n")
+            err = crossInit(local, remote)
+            if err != nil { return err }
+        } else if remoteTailHash != "" && localTailHash == "" {
+            tailHash = remoteTailHash
+            err = AssertSyncFolderIsEmpty(local)
+            if err != nil { return err }
+            status.Printf("@(dim)Initializing local repo from remote repo...\n")
+            err = crossInit(remote, local)
+            if err != nil { return err }
+        } else if localTailHash == "" && remoteTailHash == "" {
+            err = AssertSyncFolderIsEmpty(local)
+            if err != nil { return err }
+            err = AssertSyncFolderIsEmpty(remote)
+            if err != nil { return err }
+            status.Printf("@(dim)Initializing both local and remote gut repos...\n")
+            status.Printf("@(dim)Initializing local repo first...\n")
+            err = GutInit(local)
+            if err != nil { return err }
+            err = GutEnsureInitialCommit(local)
+            if err != nil { return err }
+            tailHash = GetTailHash(local)
+            if tailHash == "" {
+                return errors.New(fmt.Sprintf("Failed to initialize new gut repo in %s", local.SyncPathAnsi()))
+            }
+            status.Printf("@(dim)Initializing remote repo from local repo...\n")
+            err = crossInit(local, remote)
+            if err != nil { return err }
+        } else {
+            status.Printf("@(error:Cannot sync incompatible gut repos:)\n")
+            status.Printf("@(error:Local initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(localTailHash))
+            status.Printf("@(error:Remote initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(remoteTailHash))
+            Shutdown()
+        }
+    } else {
+        // This is the happy path where the local and remote repos are already initialized and are compatible.
+        tailHash = localTailHash
+        err = startGutDaemon(local)
+        if err != nil { return err }
+        err = startGutDaemon(remote)
+        if err != nil { return err }
+        // XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
+    }
 
-    // # Do we need to initialize local and/or remote gut repos?
-    // if not local_tail_hash or local_tail_hash != remote_tail_hash:
-    //     status.out('(@dim)Local gut repo base commit: [' + color_commit(local_tail_hash) + '(@dim)]\n')
-    //     status.out('(@dim)Remote gut repo base commit: [' + color_commit(remote_tail_hash) + '(@dim)]\n')
-    //     if local_tail_hash and not remote_tail_hash:
-    //         tail_hash = local_tail_hash
-    //         assert_folder_empty(remote, remote_path)
-    //         status.out('(@dim)Initializing remote repo from local repo...\n')
-    //         yield from cross_init(local, local_path, remote, remote_path, )
-    //     elif remote_tail_hash and not local_tail_hash:
-    //         tail_hash = remote_tail_hash
-    //         assert_folder_empty(local, local_path)
-    //         status.out('(@dim)Initializing local folder from remote gut repo...\n')
-    //         yield from cross_init(remote, remote_path, local, local_path)
-    //     elif not local_tail_hash and not remote_tail_hash:
-    //         assert_folder_empty(remote, remote_path)
-    //         assert_folder_empty(local, local_path)
-    //         status.out('(@dim)Initializing both local and remote gut repos...\n')
-    //         status.out('(@dim)Initializing local repo first...\n')
-    //         yield from gut_cmd.init(local, local_path)
-    //         yield from gut_cmd.ensure_initial_commit(local, local_path)
-    //         tail_hash = get_tail_hash(local, local_path)
-    //         status.out('(@dim)Initializing remote repo from local repo...\n')
-    //         yield from cross_init(local, local_path, remote, remote_path)
-    //     else:
-    //         status.out('(@error)Cannot sync incompatible gut repos:\n')
-    //         status.out('(@error)Local initial commit hash: [%s(@error)]\n' % (color_commit(local_tail_hash),))
-    //         status.out('(@error)Remote initial commit hash: [%s(@error)]\n' % (color_commit(remote_tail_hash),))
-    //         shutdown()
-    // else:
-    //     tail_hash = local_tail_hash
-    //     yield from gut_cmd.daemon(local, local_path, tail_hash, gutd_bind_port)
-    //     yield from gut_cmd.daemon(remote, remote_path, tail_hash, gutd_bind_port)
-    //     # XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
+    err = setupGutOrigin(local)
+    if err != nil { return err }
+    err = setupGutOrigin(remote)
+    if err != nil { return err }
 
-    // gut_cmd.setup_origin(local, local_path, tail_hash, gutd_connect_port)
-    // gut_cmd.setup_origin(remote, remote_path, tail_hash, gutd_connect_port)
+    commitAndUpdate := func(src *SyncContext, changedPaths []string, updateUntracked bool) (err error) {
+        var dest *SyncContext
+        if src == local {
+            dest = remote
+        } else {
+            dest = local
+        }
+        prefix := CommonPathPrefix(changedPaths...)
+        if prefix != "" {
+            // git is annoying if you try to git-add git-ignored files (printing a message that is very helpful when there is a human
+            // attached to stdin/stderr), so let's always just target the last *folder* by lopping off everything after the last slash:
+            lastIndex := strings.LastIndex(prefix, "/")
+            if lastIndex == -1 {
+                prefix = ""
+            } else {
+                prefix = prefix[:lastIndex+1]
+            }
+        }
+        if prefix == "" {
+            prefix = "."
+        }
+        changed, err := GutCommit(src, prefix, updateUntracked)
+        if err != nil { return err }
+        if changed {
+            return GutPull(dest)
+        }
+        return nil
+    }
 
-    // @asyncio.coroutine
-    // def commit_and_update(src_system, changed_paths=None, update_untracked=False):
-    //     if src_system == 'local':
-    //         src_context = local
-    //         src_path = local_path
-    //         dest_context = remote
-    //         dest_path = remote_path
-    //         dest_system = 'remote'
-    //     else:
-    //         src_context = remote
-    //         src_path = remote_path
-    //         dest_context = local
-    //         dest_path = local_path
-    //         dest_system = 'local'
+    type FileEvent struct {
+        ctx *SyncContext
+        filepath string
+    }
+    eventChan := make(chan FileEvent)
+    fileEventCallbackGen := func(ctx *SyncContext) func(filepath string) {
+        return func(filepath string) {
+            eventChan<-FileEvent{ctx, filepath}
+        }
+    }
 
-    //     # Based on the set of changed paths, figure out what we need to pass to `gut add` in order to capture everything
-    //     if not changed_paths:
-    //         prefix = '.'
-    //     # This is kind of annoying because it regularly picks up .gutignored files, e.g. the ".#." files emacs drops:
-    //     # elif len(changed_paths) == 1:
-    //     #     (prefix,) = changed_paths
-    //     else:
-    //         # commonprefix operates on strings, not paths; so lop off the last bit of the path so that if we get two files within
-    //         # the same directory, e.g. "test/sarah" and "test/sally", we'll look in "test/" instead of in "test/sa".
-    //         separator = '\\' if src_context._is_windows else '/'
-    //         prefix = os.path.commonprefix(changed_paths).rpartition(separator)[0] or '.'
-    //     # out('system: %s\npaths: %s\ncommon prefix: %s\n' % (src_system, ' '.join(changed_paths) if changed_paths else '', prefix))
+    WatchForChanges(local, fileEventCallbackGen(local))
+    WatchForChanges(remote, fileEventCallbackGen(remote))
+    // The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
+    // commit_and_update calls below and the time that the filesystem watches are attached.
 
-    //     try:
-    //         if (yield from gut_cmd.commit(src_context, src_path, prefix, update_untracked=update_untracked)):
-    //             yield from gut_cmd.pull(dest_context, dest_path)
-    //     except plumbum.commands.ProcessExecutionError:
-    //         status.out('\n\n(@error)Error during commit-and-pull:\n')
-    //         traceback.print_exc(file=sys.stderr)
+    commitAndUpdate(remote, []string{}, true)
+    commitAndUpdate(local, []string{}, true)
+    GutPull(remote)
+    GutPull(local)
 
-    // event_queue = asyncio.Queue()
-    // SHUTDOWN_STR = '3qo4c8h56t349yo57yfv534wto8i7435oi5'
-    // def shutdown_watch_consumer():
-    //     @asyncio.coroutine
-    //     def _shutdown_watch_consumer():
-    //         yield from event_queue.put(SHUTDOWN_STR)
-    //     asyncio.async(_shutdown_watch_consumer())
-    // on_shutdown(shutdown_watch_consumer)
+    var haveChanges bool
+    var changedPaths map[*SyncContext]map[string]bool
+    var changedIgnore map[*SyncContext]bool
+    clearChanges := func() {
+        haveChanges = false
+        changedPaths = make(map[*SyncContext]map[string]bool)
+        changedIgnore = make(map[*SyncContext]bool)
+    }
+    clearChanges()
+    flushChanges := func() {
 
-    // yield from util.watch_for_changes(local, local_path, 'local', event_queue)
-    // yield from util.watch_for_changes(remote, remote_path, 'remote', event_queue)
-    // # The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
-    // # commit_and_update calls below and the time that the filesystem watches are attached.
+        clearChanges()
+    }
 
-    // yield from commit_and_update('remote', update_untracked=True)
-    // yield from commit_and_update('local', update_untracked=True)
-    // yield from gut_cmd.pull(remote, remote_path)
-    // yield from gut_cmd.pull(local, local_path)
+    var event FileEvent
+    for {
+        if haveChanges {
+            select {
+                case event = <-eventChan:
+                    break
+                case <-time.After(commitDebounceDuration):
+                    flushChanges()
+                    continue
+            }
+        } else {
+            event = <-eventChan
+        }
+        status.Printf("Event received: [%s]", event.filepath)
+        parts := strings.Split(event.filepath, "/")
+        skip := false
+        for _, part := range parts {
+            if part == ".gut" { skip = true }
+            if part == ".gutignore" { changedIgnore[event.ctx] = true }
+        }
+        if skip { continue }
+        haveChanges = true
+        ctxChanged, ok := changedPaths[event.ctx]
+        if !ok {
+             ctxChanged = make(map[string]bool)
+             changedPaths[event.ctx] = ctxChanged
+        }
+        ctxChanged[event.filepath] = true
+    }
 
-    // changed = {}
-    // changed_ignore = set()
-    // while True:
-    //     try:
-    //         fut = event_queue.get()
-    //         event = yield from (asyncio.wait_for(fut, 0.1) if changed else fut)
-    //     except asyncio.TimeoutError:
-    //         for system, paths in changed.items():
-    //             yield from commit_and_update(system, paths, update_untracked=(system in changed_ignore))
-    //         changed.clear()
-    //         changed_ignore.clear()
-    //     else:
-    //         if event == SHUTDOWN_STR:
-    //             break
-    //         system, path = event
-    //         # Ignore events inside the .gut folder; these should also be filtered out in inotifywait/fswatch/etc if possible
-    //         path_parts = path.split(os.sep)
-    //         if not '.gut' in path_parts:
-    //             if system not in changed:
-    //                 changed[system] = set()
-    //             changed[system].add(path)
-    //             if path_parts[-1] == '.gutignore':
-    //                 changed_ignore.add(system)
-    //                 status.out('changed_ignore %s on %s\n' % (path, system))
-    //             else:
-    //                 status.out('changed %s %s\n' % (system, path))
-    //         else:
-    //             status.out('ignoring changed %s %s\n' % (system, path))
-
+    status.Printf("Exiting Sync because it's not finished.\n")
     return nil
 }
 

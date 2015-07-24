@@ -36,6 +36,10 @@ func (ctx *SyncContext) ParseSyncPath(path string) error {
     return nil
 }
 
+func (ctx *SyncContext) SyncPath() string {
+    return ctx.syncPath
+}
+
 func (ctx *SyncContext) String() string {
     if ctx.Hostname() != "" {
         return fmt.Sprintf("{SyncContext %s@%s:%s}", ctx.Username(), ctx.Hostname(), ctx.syncPath)

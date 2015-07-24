@@ -35,7 +35,6 @@ func GetNumCores(ctx *SyncContext) string {
     }
 }
 
-
 func FindOpenPorts(numPorts int, ctxs ...*SyncContext) ([]int, error) {
     if numPorts == 0 {
         return []int{}, nil
@@ -67,4 +66,78 @@ func FindOpenPorts(numPorts int, ctxs ...*SyncContext) ([]int, error) {
         }
     }
     return nil, errors.New("Not enough available ports found")
+}
+
+func KillPreviousProcess(ctx *SyncContext, name string) {
+
+}
+
+func GetCmd(ctx *SyncContext, commands ...string) string {
+    for _, command := range commands {
+        _, err := ctx.Output("which", command)
+        if err == nil {
+            return command
+        }
+    }
+    return ""
+}
+
+func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdBindPort int, gutdConnectPort int, autosshMonitorPort int) (err error) {
+    cmd := GetCmd(local, "autossh", "ssh")
+    if cmd == "" {
+        MissingDependency(local, "ssh")
+    }
+    KillPreviousProcess(local, cmd)
+    sshTunnelOpts := fmt.Sprintf("%d:localhost:%d", gutdConnectPort, gutdBindPort)
+    args := []string{cmd}
+    if cmd == "autossh" && local.IsDarwin() {
+        args = append(args, "-M", fmt.Sprintf("%d", autosshMonitorPort))
+    }
+    args = append(args, "-N", "-L", sshTunnelOpts, "-R", sshTunnelOpts, remote.SshAddress())
+    go local.Quote(cmd, args...)
+    // SaveProcessPid(local, cmd, proc.pid)
+    return nil
+}
+
+func WatchForChanges(ctx *SyncContext, fileEventCallback func(string)) (err error) {
+    return nil
+}
+
+const GutHashDisplayChars = 10
+func TrimCommit(commit string) string {
+    if len(commit) > GutHashDisplayChars {
+        return commit[:GutHashDisplayChars]
+    }
+    return commit
+}
+
+func AssertSyncFolderIsEmpty(ctx *SyncContext) (err error) {
+    return errors.New("Unimplemented")
+}
+
+func Shutdown() {
+    panic("dsikhfds")
+}
+
+func CommonPathPrefix(paths ...string) string {
+    if len(paths) == 0 { return "" }
+    common := paths[0]
+    for _, path := range paths[1:] {
+        for len(path) < len(common) || path[:len(common)] != common {
+            if common[len(common)-1] == '/' {
+                // Lop off the trailing slash, if there is one
+                common = common[:len(common)-1]
+            } else {
+                lastIndex := strings.LastIndex(common, "/")
+                if lastIndex == -1 {
+                    // There is no common prefix
+                    return ""
+                } else {
+                    // Lop off everything after the last slash
+                    common = common[:lastIndex + 1]
+                }
+            }
+        }
+    }
+    return common
 }
