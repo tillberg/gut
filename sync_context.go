@@ -9,7 +9,6 @@ import (
 
 type SyncContext struct {
     *bismuth.ExecContext
-
     syncPath string
 }
 

@@ -88,6 +88,7 @@ func doSession(ctx *SyncContext, done chan bool) {
 
 func Sync(local *SyncContext, remote *SyncContext) (err error) {
     status := local.NewLogger("sync")
+    defer status.Close()
     status.Printf("@(dim:Syncing) %s @(dim:with) %s\n", local.SyncPathAnsi(), remote.SyncPathAnsi())
 
     _, err = EnsureBuild(local, local)
@@ -95,8 +96,9 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     _, err = EnsureBuild(local, remote)
     if err != nil { return err }
 
-    // yield from ensure_build(local)
-    // yield from ensure_build(remote)
+    ports, err := FindOpenPorts(3, local, remote)
+    if err != nil { return err }
+    // status.Printf("Using ports %v\n", ports)
 
     // ports = util.find_open_ports([local, remote], 3)
     // # out(dim('Using ports ') + dim(', ').join([unicode(port) for port in ports]) +'\n')
@@ -293,5 +295,4 @@ func main() {
         err = Sync(local, remote)
         if err != nil { status.Fatal(err) }
     }
-
 }

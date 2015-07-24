@@ -10,11 +10,6 @@ import (
     "github.com/kballard/go-shellquote"
 )
 
-func Mkdirp(ctx *SyncContext, p string) (err error) {
-    _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(p))
-    return err
-}
-
 func EnsureGutFolders(ctx *SyncContext) (err error) {
     err = Mkdirp(ctx, GutSrcPath)
     if err != nil { return err }
@@ -149,34 +144,12 @@ func GutBuildPrepare(local *SyncContext, ctx *SyncContext) (err error) {
     return err
 }
 
-func windowsPathToMingwPath(p string) string {
-    // XXX path/filepath might be better for this sort of thing
-    p = strings.Replace(p, ":", "", 1)
-    p = strings.Replace(p, "\\", "/", -1)
-    return "/" + p
-}
-
-const defaultNumCores = "4"
-func getNumCores(ctx *SyncContext) string {
-    if ctx.IsWindows() {
-        out, err := ctx.Output("wmic", "CPU", "Get", "NumberOfLogicalProcessors", "/Format:List")
-        if err != nil { return defaultNumCores }
-        out = strings.TrimSpace(out)
-        parts := strings.Split(out, "=")
-        return parts[len(parts) - 1]
-    } else {
-        out, err := ctx.Output("getconf", "_NPROCESSORS_ONLN")
-        if err != nil { return defaultNumCores }
-        return strings.TrimSpace(out)
-    }
-}
-
 func GutBuild(ctx *SyncContext, buildPath string) (err error) {
     buildPath = ctx.AbsPath(buildPath)
     gutDistPath := ctx.AbsPath(GutDistPath)
     var installPrefix string
     if ctx.IsWindows() {
-        installPrefix = "prefix=" + windowsPathToMingwPath(gutDistPath)
+        installPrefix = "prefix=" + WindowsPathToMingwPath(gutDistPath)
     } else {
         installPrefix = "prefix=" + gutDistPath
     }
@@ -200,7 +173,7 @@ func GutBuild(ctx *SyncContext, buildPath string) (err error) {
         err = ctx.QuoteCwd("autoconf", buildPath, ctx.AbsPath(path.Join(buildPath, "configure")), installPrefix)
         if err != nil { return err }
     }
-    parallelism := getNumCores(ctx)
+    parallelism := GetNumCores(ctx)
     status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)\n", parallelism)
     err = doMake("build", installPrefix, "-j", parallelism)
     if err != nil { return err }
