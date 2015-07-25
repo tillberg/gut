@@ -107,7 +107,9 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     gutdConnectPort := ports[1]
     autosshMonitorPort := ports[2]
 
-    go StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
+    pid, err := StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
+    if err != nil { status.Bail(err) }
+    status.Printf("ssh tunnel pid: %d", pid)
 
     localTailHash, err := GetTailHash(local)
     if err != nil { status.Bail(err) }
@@ -134,7 +136,6 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     if localTailHash == "" || localTailHash != remoteTailHash {
         status.Printf("@(dim:Local gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(localTailHash))
         status.Printf("@(dim:Remote gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(remoteTailHash))
-        log.Fatal("bye")
         if localTailHash != "" && remoteTailHash == "" {
             tailHash = localTailHash
             err = AssertSyncFolderIsEmpty(remote)
@@ -177,7 +178,6 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     } else {
         // This is the happy path where the local and remote repos are already initialized and are compatible.
         tailHash = localTailHash
-        log.Fatal("yay bye")
         err = startGutDaemon(local)
         if err != nil { status.Bail(err) }
         err = startGutDaemon(remote)

@@ -9,11 +9,15 @@ import (
 )
 
 func Mkdirp(ctx *SyncContext, p string) (err error) {
+    if ctx.IsWindows() {
+        return errors.New("Not implemented")
+    }
     _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(p))
     return err
 }
 
 func WindowsPathToMingwPath(p string) string {
+    panic("XXX Does this work?")
     // XXX path/filepath might be better for this sort of thing
     p = strings.Replace(p, ":", "", 1)
     p = strings.Replace(p, "\\", "/", -1)
@@ -82,7 +86,7 @@ func GetCmd(ctx *SyncContext, commands ...string) string {
     return ""
 }
 
-func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdBindPort int, gutdConnectPort int, autosshMonitorPort int) (err error) {
+func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdBindPort int, gutdConnectPort int, autosshMonitorPort int) (pid int, err error) {
     cmd := GetCmd(local, "autossh", "ssh")
     if cmd == "" {
         MissingDependency(local, "ssh")
@@ -94,9 +98,9 @@ func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdBindPort int, g
         args = append(args, "-M", fmt.Sprintf("%d", autosshMonitorPort))
     }
     args = append(args, "-N", "-L", sshTunnelOpts, "-R", sshTunnelOpts, remote.SshAddress())
-    go local.Quote(cmd, args...)
+    pid, _, err = local.QuoteDaemon(cmd, args...)
     // SaveProcessPid(local, cmd, proc.pid)
-    return nil
+    return pid, err
 }
 
 func WatchForChanges(ctx *SyncContext, fileEventCallback func(string)) (err error) {
@@ -129,7 +133,7 @@ func AssertSyncFolderIsEmpty(ctx *SyncContext) (err error) {
 }
 
 func Shutdown() {
-    panic("dsikhfds")
+    panic("Not implemented")
 }
 
 func CommonPathPrefix(paths ...string) string {

@@ -1,6 +1,7 @@
 package main
 
 import (
+    "errors"
     "path"
     "strings"
 )
@@ -19,25 +20,25 @@ func GetTailHash(ctx *SyncContext) (string, error) {
 }
 
 func GutDaemon(ctx *SyncContext, tailHash string, bindPort int) (err error) {
-    return nil
+    return errors.New("Not implemented")
 }
 
 func GutInit(ctx *SyncContext) (err error) {
-    return nil
+    return errors.New("Not implemented")
 }
 
 func GutSetupOrigin(ctx *SyncContext, tailHash string, connectPort int) (err error) {
-    return nil
+    return errors.New("Not implemented")
 }
 
 func GutPull(ctx *SyncContext) (err error) {
-    return nil
+    return errors.New("Not implemented")
 }
 
 func GutCommit(ctx *SyncContext, prefix string, updateUntracked bool) (changed bool, err error) {
-    return false, nil
+    return false, errors.New("Not implemented")
 }
 
 func GutEnsureInitialCommit(ctx *SyncContext) (err error) {
-    return nil
+    return errors.New("Not implemented")
 }
