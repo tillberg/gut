@@ -96,12 +96,12 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     status.Printf("@(dim:Syncing) %s @(dim:with) %s\n", local.SyncPathAnsi(), remote.SyncPathAnsi())
 
     _, err = EnsureBuild(local, local)
-    if err != nil { return err }
+    if err != nil { status.Bail(err) }
     _, err = EnsureBuild(local, remote)
-    if err != nil { return err }
+    if err != nil { status.Bail(err) }
 
     ports, err := FindOpenPorts(3, local, remote)
-    if err != nil { return err }
+    if err != nil { status.Bail(err) }
     // status.Printf("Using ports %v\n", ports)
     gutdBindPort := ports[0]
     gutdConnectPort := ports[1]
@@ -109,22 +109,24 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
 
     go StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
 
-    localTailHash := GetTailHash(local)
-    remoteTailHash := GetTailHash(remote)
+    localTailHash, err := GetTailHash(local)
+    if err != nil { status.Bail(err) }
+    remoteTailHash, err := GetTailHash(remote)
+    if err != nil { status.Bail(err) }
     tailHash := ""
 
     startGutDaemon := func(ctx *SyncContext) error { return GutDaemon(ctx, tailHash, gutdBindPort) }
     setupGutOrigin := func(ctx *SyncContext) error { return GutSetupOrigin(ctx, tailHash, gutdConnectPort) }
     crossInit := func(src *SyncContext, dest *SyncContext) (err error) {
         err = startGutDaemon(src)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         err = GutInit(dest)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         err = setupGutOrigin(dest)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         time.Sleep(2) // Give the gut-daemon and SSH tunnel a moment to start up
         err = GutPull(dest)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         err = startGutDaemon(dest)
         return err
     }
@@ -132,38 +134,40 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     if localTailHash == "" || localTailHash != remoteTailHash {
         status.Printf("@(dim:Local gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(localTailHash))
         status.Printf("@(dim:Remote gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(remoteTailHash))
+        log.Fatal("bye")
         if localTailHash != "" && remoteTailHash == "" {
             tailHash = localTailHash
             err = AssertSyncFolderIsEmpty(remote)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
             status.Printf("@(dim)Initializing remote repo from local repo...\n")
             err = crossInit(local, remote)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
         } else if remoteTailHash != "" && localTailHash == "" {
             tailHash = remoteTailHash
             err = AssertSyncFolderIsEmpty(local)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
             status.Printf("@(dim)Initializing local repo from remote repo...\n")
             err = crossInit(remote, local)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
         } else if localTailHash == "" && remoteTailHash == "" {
             err = AssertSyncFolderIsEmpty(local)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
             err = AssertSyncFolderIsEmpty(remote)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
             status.Printf("@(dim)Initializing both local and remote gut repos...\n")
             status.Printf("@(dim)Initializing local repo first...\n")
             err = GutInit(local)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
             err = GutEnsureInitialCommit(local)
-            if err != nil { return err }
-            tailHash = GetTailHash(local)
+            if err != nil { status.Bail(err) }
+            tailHash, err = GetTailHash(local)
+            if err != nil { status.Bail(err) }
             if tailHash == "" {
                 return errors.New(fmt.Sprintf("Failed to initialize new gut repo in %s", local.SyncPathAnsi()))
             }
             status.Printf("@(dim)Initializing remote repo from local repo...\n")
             err = crossInit(local, remote)
-            if err != nil { return err }
+            if err != nil { status.Bail(err) }
         } else {
             status.Printf("@(error:Cannot sync incompatible gut repos:)\n")
             status.Printf("@(error:Local initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(localTailHash))
@@ -173,17 +177,18 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     } else {
         // This is the happy path where the local and remote repos are already initialized and are compatible.
         tailHash = localTailHash
+        log.Fatal("yay bye")
         err = startGutDaemon(local)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         err = startGutDaemon(remote)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         // XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
     }
 
     err = setupGutOrigin(local)
-    if err != nil { return err }
+    if err != nil { status.Bail(err) }
     err = setupGutOrigin(remote)
-    if err != nil { return err }
+    if err != nil { status.Bail(err) }
 
     commitAndUpdate := func(src *SyncContext, changedPaths []string, updateUntracked bool) (err error) {
         var dest *SyncContext
@@ -207,7 +212,7 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             prefix = "."
         }
         changed, err := GutCommit(src, prefix, updateUntracked)
-        if err != nil { return err }
+        if err != nil { status.Bail(err) }
         if changed {
             return GutPull(dest)
         }
@@ -284,7 +289,8 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
 }
 
 func main() {
-    // log.EnableMultilineMode()
+    log.Printf("Process ID: %d\n", os.Getpid())
+    log.EnableMultilineMode()
     log.EnableColorTemplate()
     log.AddAnsiColorCode("error", 31)
     log.AddAnsiColorCode("commit", 32)
@@ -327,7 +333,7 @@ func main() {
         if err != nil { status.Fatal(err) }
         remote := NewSyncContext()
         err = remote.ParseSyncPath(OptsSync.Positional.RemotePath)
-        if err != nil { status.Fatalln(err) }
+        if err != nil { status.Fatal(err) }
         err = remote.Connect()
         if err != nil { status.Fatal(err) }
 

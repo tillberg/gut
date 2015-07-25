@@ -112,7 +112,20 @@ func TrimCommit(commit string) string {
 }
 
 func AssertSyncFolderIsEmpty(ctx *SyncContext) (err error) {
-    return errors.New("Unimplemented")
+    p := ctx.AbsSyncPath()
+    bail := func() {
+        ctx.Logger().Printf("@(error:Refusing to initialize) @(path:%s) @(error:on) %s ", p, ctx.NameAnsi())
+        ctx.Logger().Printf("@(error:as it is not an empty directory.)\n")
+        ctx.Logger().Fatalf("@(error:Move or delete it manually first, the try running gut-sync again.)\n")
+    }
+    fileInfo, err := ctx.Stat(p)
+    if err != nil { bail() }
+    if fileInfo == nil { return nil }
+    if !fileInfo.IsDir() { bail() }
+    out, err := ctx.Output("ls", "-A", ctx.AbsSyncPath())
+    if err != nil { bail() }
+    if len(strings.TrimSpace(out)) > 0 { bail() }
+    return nil
 }
 
 func Shutdown() {

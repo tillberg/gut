@@ -36,8 +36,8 @@ func (ctx *SyncContext) ParseSyncPath(path string) error {
     return nil
 }
 
-func (ctx *SyncContext) SyncPath() string {
-    return ctx.syncPath
+func (ctx *SyncContext) AbsSyncPath() string {
+    return ctx.AbsPath(ctx.syncPath)
 }
 
 func (ctx *SyncContext) String() string {
@@ -56,4 +56,22 @@ func (ctx *SyncContext) PathAnsi(p string) string {
 
 func (ctx *SyncContext) SyncPathAnsi() string {
     return ctx.PathAnsi(ctx.syncPath)
+}
+
+func (ctx *SyncContext) GutExe() string {
+    return ctx.AbsPath(GutExePath)
+}
+
+func (ctx *SyncContext) gutArgs(otherArgs ...string) []string {
+    args := []string{}
+    args = append(args, ctx.GutExe())
+    return append(args, otherArgs...)
+}
+
+func (ctx *SyncContext) GutOutput(args ...string) (string, error) {
+    return ctx.OutputCwd(ctx.AbsSyncPath(), ctx.gutArgs(args...)...)
+}
+
+func (ctx *SyncContext) GutQuote(suffix string, args ...string) error {
+    return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.gutArgs(args...)...)
 }

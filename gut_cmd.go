@@ -7,16 +7,15 @@ import (
 
 // Query the gut repo for the initial commit to the repo. We use this to determine if two gut repos are compatibile.
 // http://stackoverflow.com/questions/1006775/how-to-reference-the-initial-commit
-
-func GetTailHash(ctx *SyncContext) string {
-    exists, err := ctx.PathExists(path.Join(ctx.SyncPath(), ".gut"))
-    if err != nil { return "" }
+func GetTailHash(ctx *SyncContext) (string, error) {
+    exists, err := ctx.PathExists(path.Join(ctx.AbsSyncPath(), ".gut"))
+    if err != nil { ctx.Logger().Bail(err) }
     if exists {
-        output, err := ctx.Output("rev-list", "--max-parents=0", "HEAD")
-        if err != nil { return "" }
-        return strings.TrimSpace(output)
+        output, err := ctx.GutOutput("rev-list", "--max-parents=0", "HEAD")
+        if err != nil { ctx.Logger().Bail(err) }
+        return strings.TrimSpace(output), nil
     }
-    return ""
+    return "", nil
 }
 
 func GutDaemon(ctx *SyncContext, tailHash string, bindPort int) (err error) {
