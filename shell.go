@@ -7,6 +7,7 @@ import (
     "os"
     "os/signal"
     "strings"
+    "sync"
     "syscall"
     "time"
     "github.com/jessevdk/go-flags"
@@ -173,13 +174,12 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             status.Printf("@(error:Cannot sync incompatible gut repos:)\n")
             status.Printf("@(error:Local initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(localTailHash))
             status.Printf("@(error:Remote initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(remoteTailHash))
-            Shutdown()
+            Shutdown("")
         }
     } else {
 
         // This is the happy path where the local and remote repos are already initialized and are compatible.
         tailHash = localTailHash
-        time.Sleep(100 * time.Second)
         err = startGutDaemon(local)
         if err != nil { status.Bail(err) }
         err = startGutDaemon(remote)
@@ -290,6 +290,32 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     return nil
 }
 
+var shutdownLock sync.Mutex
+func Shutdown(reason string) {
+    shutdownLock.Lock()
+    status := log.New(os.Stderr, "", 0)
+    if reason != "" {
+        status.Printf("%s. ", reason)
+    }
+    status.Printf("Stopping all subprocesses...\n")
+    done := make(chan bool)
+    for _, _ctx := range AllSyncContexts {
+        go func(ctx *SyncContext) {
+            ctx.KillAllViaPidfiles()
+            time.Sleep(200 * time.Millisecond)
+            ctx.KillAllSessions()
+            time.Sleep(1 * time.Second)
+            ctx.Close()
+            done<-true
+        }(_ctx)
+    }
+    for _, _ = range AllSyncContexts {
+        <-done
+    }
+    status.Printf("Exiting.\n")
+    os.Exit(1)
+}
+
 func main() {
     log.EnableMultilineMode()
     log.EnableColorTemplate()
@@ -320,23 +346,7 @@ func main() {
     signal.Notify(signalChan, os.Interrupt)
     go func() {
         <-signalChan
-        status.Printf("Received SIGINT. Stopping daemons...\n")
-        done := make(chan bool)
-        for _, _ctx := range AllSyncContexts {
-            go func(ctx *SyncContext) {
-                ctx.KillAllViaPidfiles()
-                time.Sleep(200 * time.Millisecond)
-                ctx.KillAllSessions()
-                time.Sleep(1 * time.Second)
-                ctx.Close()
-                done<-true
-            }(_ctx)
-        }
-        for _, _ = range AllSyncContexts {
-            <-done
-        }
-        status.Printf("Exiting.\n")
-        os.Exit(1)
+        Shutdown("Received SIGINT")
     }()
 
     if cmd == "build" {
@@ -357,11 +367,14 @@ func main() {
         if err != nil { status.Fatal(err) }
         err = local.Connect()
         if err != nil { status.Fatal(err) }
+        local.KillAllViaPidfiles()
+
         remote := NewSyncContext()
         err = remote.ParseSyncPath(OptsSync.Positional.RemotePath)
         if err != nil { status.Fatal(err) }
         err = remote.Connect()
         if err != nil { status.Fatal(err) }
+        remote.KillAllViaPidfiles()
 
         err = Sync(local, remote)
         if err != nil { status.Fatal(err) }

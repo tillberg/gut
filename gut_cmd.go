@@ -2,6 +2,7 @@ package main
 
 import (
     "errors"
+    "fmt"
     "path"
     "strings"
 )
@@ -19,8 +20,32 @@ func GetTailHash(ctx *SyncContext) (string, error) {
     return "", nil
 }
 
+// Start a git-daemon on the host, bound to port gutd_bind_port on the *localhost* network interface only.
+// `autossh` will create a tunnel to expose this port as gutd_connect_port on the other host.
 func GutDaemon(ctx *SyncContext, tailHash string, bindPort int) (err error) {
-    return errors.New("Not implemented")
+    basePath := ctx.AbsPath(GutDaemonPath)
+    ctx.Mkdirp(basePath)
+    symlinkPath := path.Join(basePath, tailHash)
+    exists, err := ctx.PathExists(symlinkPath)
+    if err != nil { return err }
+    if exists {
+        err = ctx.DeleteLink(symlinkPath)
+        if err != nil { return err }
+    }
+    err = ctx.Symlink(ctx.AbsSyncPath(), symlinkPath)
+    if err != nil { return err }
+    args := []string{
+        "daemon",
+        "--export-all",
+        "--base-path=" + basePath,
+        "--reuseaddr",
+        "--listen=localhost",
+        fmt.Sprintf("--port=%d", bindPort),
+        basePath,
+    }
+    pid, _, err := ctx.QuoteDaemon("gut-daemon", ctx.GutArgs(args...)...)
+    if err != nil { return err }
+    return ctx.SaveDaemonPid("gut-daemon", pid)
 }
 
 func GutInit(ctx *SyncContext) (err error) {
@@ -28,7 +53,19 @@ func GutInit(ctx *SyncContext) (err error) {
 }
 
 func GutSetupOrigin(ctx *SyncContext, tailHash string, connectPort int) (err error) {
-    return errors.New("Not implemented")
+    _, err = ctx.GutOutput("remote", "rm", "origin")
+    if err != nil { return err }
+    originUrl := fmt.Sprintf("gut://localhost:%s/%s/", connectPort, tailHash)
+    _, err = ctx.GutOutput("remote", "add", "origin", originUrl)
+    if err != nil { return err }
+    _, err = ctx.GutOutput("config", "color.ui", "always")
+    if err != nil { return err }
+    hostname, err := ctx.Output("hostname")
+    if err != nil { return err }
+    _, err = ctx.GutOutput("config", "user.name", hostname)
+    if err != nil { return err }
+    _, err = ctx.GutOutput("config", "user.email", "gut-sync@" + hostname)
+    return err
 }
 
 func GutPull(ctx *SyncContext) (err error) {

@@ -76,18 +76,18 @@ func (ctx *SyncContext) GutExe() string {
     return ctx.AbsPath(GutExePath)
 }
 
-func (ctx *SyncContext) gutArgs(otherArgs ...string) []string {
+func (ctx *SyncContext) GutArgs(otherArgs ...string) []string {
     args := []string{}
     args = append(args, ctx.GutExe())
     return append(args, otherArgs...)
 }
 
 func (ctx *SyncContext) GutOutput(args ...string) (string, error) {
-    return ctx.OutputCwd(ctx.AbsSyncPath(), ctx.gutArgs(args...)...)
+    return ctx.OutputCwd(ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }
 
 func (ctx *SyncContext) GutQuote(suffix string, args ...string) error {
-    return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.gutArgs(args...)...)
+    return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }
 
 func (ctx *SyncContext) getPidfilePath(name string) string {

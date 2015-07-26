@@ -124,10 +124,6 @@ func AssertSyncFolderIsEmpty(ctx *SyncContext) (err error) {
     return nil
 }
 
-func Shutdown() {
-    panic("Not implemented")
-}
-
 func CommonPathPrefix(paths ...string) string {
     if len(paths) == 0 { return "" }
     common := paths[0]
