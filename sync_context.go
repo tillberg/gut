@@ -3,6 +3,7 @@ package main
 import (
     "errors"
     "fmt"
+    "path"
     "regexp"
     "github.com/tillberg/bismuth"
 )
@@ -58,6 +59,14 @@ func (ctx *SyncContext) SyncPathAnsi() string {
     return ctx.PathAnsi(ctx.syncPath)
 }
 
+func (ctx *SyncContext) Mkdirp(p string) (err error) {
+    if ctx.IsWindows() {
+        return errors.New("Not implemented")
+    }
+    _, err = ctx.Output("mkdir", "-p", ctx.AbsPath(p))
+    return err
+}
+
 func (ctx *SyncContext) GutExe() string {
     return ctx.AbsPath(GutExePath)
 }
@@ -74,4 +83,14 @@ func (ctx *SyncContext) GutOutput(args ...string) (string, error) {
 
 func (ctx *SyncContext) GutQuote(suffix string, args ...string) error {
     return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.gutArgs(args...)...)
+}
+
+func (ctx *SyncContext) getPidfilePath(name string) string {
+    return ctx.AbsPath(path.Join(PidfilesPath, name + ".pid"))
+}
+
+func (ctx *SyncContext) SaveDaemonPid(name string, pid int) (err error) {
+    err = ctx.Mkdirp(PidfilesPath)
+    if err != nil { ctx.Logger().Bail(err) }
+    return ctx.WriteFile(ctx.getPidfilePath(name), []byte(fmt.Sprintf("%d", pid)))
 }

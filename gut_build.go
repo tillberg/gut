@@ -11,11 +11,11 @@ import (
 )
 
 func EnsureGutFolders(ctx *SyncContext) (err error) {
-    err = Mkdirp(ctx, GutSrcPath)
+    err = ctx.Mkdirp(GutSrcPath)
     if err != nil { return err }
-    err = Mkdirp(ctx, GutWinSrcPath)
+    err = ctx.Mkdirp(GutWinSrcPath)
     if err != nil { return err }
-    err = Mkdirp(ctx, GutDistPath)
+    err = ctx.Mkdirp(GutDistPath)
     return err
 }
 

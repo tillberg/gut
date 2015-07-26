@@ -22,6 +22,7 @@ const GutWinSrcPath = GutPath + "/gut-win-src"
 const MsysgitPath = GutPath + "/msysgit"
 const InotifyWinPath = GutPath + "/inotify-win"
 const GutDistPath = GutPath + "/gut-build"
+const PidfilesPath = GutPath + "/pidfiles"
 const GutExePath = GutDistPath + "/bin/gut"
 const GutDaemonPath = GutPath + "/repos"
 

@@ -59,9 +59,9 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
         buildPath = GutSrcTmpPath
         status.Printf("@(dim:Uploading) %s @(dim:to) %s@(dim:...)", local.PathAnsi(GutSrcPath), ctx.PathAnsi(buildPath))
         chanErr := make(chan error)
-        stdinChan := make(chan io.Writer)
+        stdinChan := make(chan io.WriteCloser)
         go func() {
-            Mkdirp(ctx, buildPath)
+            ctx.Mkdirp(buildPath)
             err := ctx.QuotePipeIn("untar", stdinChan, ctx.AbsPath(buildPath), "tar", "xf", "-")
             chanErr<-err
         }()
@@ -107,9 +107,8 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     gutdConnectPort := ports[1]
     autosshMonitorPort := ports[2]
 
-    pid, err := StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
+    err = StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
     if err != nil { status.Bail(err) }
-    status.Printf("ssh tunnel pid: %d", pid)
 
     localTailHash, err := GetTailHash(local)
     if err != nil { status.Bail(err) }
