@@ -5,6 +5,7 @@ import (
     "fmt"
     "io"
     "os"
+    "os/signal"
     "strings"
     "syscall"
     "time"
@@ -175,8 +176,10 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             Shutdown()
         }
     } else {
+
         // This is the happy path where the local and remote repos are already initialized and are compatible.
         tailHash = localTailHash
+        time.Sleep(100 * time.Second)
         err = startGutDaemon(local)
         if err != nil { status.Bail(err) }
         err = startGutDaemon(remote)
@@ -288,12 +291,12 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
 }
 
 func main() {
-    log.Printf("Process ID: %d\n", os.Getpid())
     log.EnableMultilineMode()
     log.EnableColorTemplate()
     log.AddAnsiColorCode("error", 31)
     log.AddAnsiColorCode("commit", 32)
     status := log.New(os.Stderr, "", 0)
+    status.Printf("Process ID: %d\n", os.Getpid())
     var args []string = os.Args[1:]
     if len(args) == 0 {
         status.Fatalln("You must specify a gut-command, e.g. `gut sync ...`")
@@ -312,6 +315,30 @@ func main() {
         status.Print("gut-sync version XXXXX")
         os.Exit(0)
     }
+
+    signalChan := make(chan os.Signal, 1)
+    signal.Notify(signalChan, os.Interrupt)
+    go func() {
+        <-signalChan
+        status.Printf("Received SIGINT. Stopping daemons...\n")
+        done := make(chan bool)
+        for _, _ctx := range AllSyncContexts {
+            go func(ctx *SyncContext) {
+                ctx.KillAllViaPidfiles()
+                time.Sleep(200 * time.Millisecond)
+                ctx.KillAllSessions()
+                time.Sleep(1 * time.Second)
+                ctx.Close()
+                done<-true
+            }(_ctx)
+        }
+        for _, _ = range AllSyncContexts {
+            <-done
+        }
+        status.Printf("Exiting.\n")
+        os.Exit(1)
+    }()
+
     if cmd == "build" {
         var local = NewSyncContext()
         err := local.Connect()

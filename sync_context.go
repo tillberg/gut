@@ -5,6 +5,8 @@ import (
     "fmt"
     "path"
     "regexp"
+    "strconv"
+    "strings"
     "github.com/tillberg/bismuth"
 )
 
@@ -13,10 +15,13 @@ type SyncContext struct {
     syncPath string
 }
 
+var AllSyncContexts = []*SyncContext{}
+
 func NewSyncContext() *SyncContext {
     ctx := &SyncContext{}
     ctx.ExecContext = &bismuth.ExecContext{}
     ctx.Init()
+    AllSyncContexts = append(AllSyncContexts, ctx)
     return ctx
 }
 
@@ -93,4 +98,36 @@ func (ctx *SyncContext) SaveDaemonPid(name string, pid int) (err error) {
     err = ctx.Mkdirp(PidfilesPath)
     if err != nil { ctx.Logger().Bail(err) }
     return ctx.WriteFile(ctx.getPidfilePath(name), []byte(fmt.Sprintf("%d", pid)))
+}
+
+func (ctx *SyncContext) KillAllViaPidfiles() (err error) {
+    logger := ctx.Logger()
+    if ctx.IsWindows() {
+        logger.Bail(errors.New("Not implemented"))
+    }
+    files, err := ctx.ListDirectory(ctx.AbsPath(PidfilesPath))
+    if err != nil { logger.Bail(err) }
+    for _, filename := range files {
+        parts := strings.Split(filename, ".")
+        if len(parts) != 2 || parts[1] != "pid" { continue }
+        name := parts[0]
+        pidfilePath := ctx.getPidfilePath(name)
+        valStr, err := ctx.ReadFile(pidfilePath)
+        if err != nil { logger.Bail(err) }
+        pid, err := strconv.ParseInt(string(valStr), 10, 32)
+        if err != nil { logger.Bail(err) }
+        // Is it still (presumably) running?
+        _, _, retCode, err := ctx.Run("pgrep", "-F", pidfilePath, name)
+        if retCode == 0 {
+            logger.Printf("@(dim)Killing %s (pid %d)...@(r)", name, pid)
+            err = ctx.Quote("pkill", "pkill", "-F", pidfilePath, name)
+            if err != nil {
+                logger.Printf(" @(error:failed, %s)@(dim:.)\n", err.Error())
+            } else {
+                logger.Printf(" done@(dim:.)\n")
+            }
+        }
+        ctx.DeleteFile(pidfilePath)
+    }
+    return nil
 }
