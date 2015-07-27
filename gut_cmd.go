@@ -66,7 +66,13 @@ func GutInit(ctx *SyncContext) (err error) {
 
 func GutSetupOrigin(ctx *SyncContext, tailHash string, connectPort int) (err error) {
     originUrl := fmt.Sprintf("gut://localhost:%d/%s/", connectPort, tailHash)
-    _, err = ctx.GutOutput("remote", "set-url", "origin", originUrl)
+    out, err := ctx.GutOutput("remote")
+    if err != nil { return err }
+    if strings.Contains(out, "origin") {
+        _, err = ctx.GutOutput("remote", "set-url", "origin", originUrl)
+    } else {
+        _, err = ctx.GutOutput("remote", "add", "origin", originUrl)
+    }
     if err != nil { return err }
     _, err = ctx.GutOutput("config", "color.ui", "always")
     if err != nil { return err }
@@ -105,9 +111,8 @@ func doMerge(ctx *SyncContext) (needCommit bool, err error) {
 var needsCommitStr = "Your local changes to the following files would be overwritten"
 func GutPull(ctx *SyncContext) (err error) {
     status := ctx.NewLogger("pull")
-    status.Printf("@(dim:Downloading changes to) %s@(dim:...)", ctx.NameAnsi())
-    ctx.GutQuote("fetch", "fetch", "origin")
-    status.Printf("@(dim) done.\n")
+    status.Printf("@(dim:Downloading changes to) %s@(dim:...)\n", ctx.NameAnsi())
+    ctx.GutQuote("fetch", "fetch", "origin", "--progress")
     needCommit, err := doMerge(ctx)
     if err != nil { return err }
     if needCommit {

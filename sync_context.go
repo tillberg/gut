@@ -82,6 +82,10 @@ func (ctx *SyncContext) GutArgs(otherArgs ...string) []string {
     return append(args, otherArgs...)
 }
 
+func (ctx *SyncContext) GutRun(args ...string) ([]byte, []byte, int, error) {
+    return ctx.RunCwd(ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
+}
+
 func (ctx *SyncContext) GutOutput(args ...string) (string, error) {
     return ctx.OutputCwd(ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }

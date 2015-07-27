@@ -171,10 +171,7 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             err = crossInit(local, remote)
             if err != nil { status.Bail(err) }
         } else {
-            status.Printf("@(error:Cannot sync incompatible gut repos:)\n")
-            status.Printf("@(error:Local initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(localTailHash))
-            status.Printf("@(error:Remote initial commit hash: [)@(commit:%s)@(error:])\n", TrimCommit(remoteTailHash))
-            Shutdown("")
+            Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
         }
     } else {
         // This is the happy path where the local and remote repos are already initialized and are compatible.
@@ -285,7 +282,7 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             }
         }
         if skip { continue }
-        status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
+        // status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
         haveChanges = true
         ctxChanged, ok := changedPaths[event.ctx]
         if !ok {
@@ -303,9 +300,9 @@ func Shutdown(reason string) {
     shutdownLock.Lock()
     status := log.New(os.Stderr, "", 0)
     if reason != "" {
-        status.Printf("%s. ", reason)
+        status.Printf("%s ", reason)
     }
-    status.Printf("Stopping all subprocesses...\n")
+    status.Printf("Stopping all subprocesses...")
     done := make(chan bool)
     for _, _ctx := range AllSyncContexts {
         go func(ctx *SyncContext) {
@@ -321,7 +318,7 @@ func Shutdown(reason string) {
     for _, _ = range AllSyncContexts {
         <-done
     }
-    status.Printf("Exiting.")
+    status.Printf(" Exiting.")
     fmt.Println()
     os.Exit(1)
 }
@@ -356,7 +353,7 @@ func main() {
     signal.Notify(signalChan, os.Interrupt)
     go func() {
         <-signalChan
-        Shutdown("Received SIGINT")
+        Shutdown("Received SIGINT.")
     }()
 
     if cmd == "build" {
