@@ -177,7 +177,6 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             Shutdown("")
         }
     } else {
-
         // This is the happy path where the local and remote repos are already initialized and are compatible.
         tailHash = localTailHash
         err = startGutDaemon(local)
@@ -285,7 +284,6 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
         }
         ctxChanged[event.filepath] = true
     }
-
     status.Printf("Exiting Sync because it's not finished.\n")
     return nil
 }
@@ -301,10 +299,11 @@ func Shutdown(reason string) {
     done := make(chan bool)
     for _, _ctx := range AllSyncContexts {
         go func(ctx *SyncContext) {
-            ctx.KillAllViaPidfiles()
-            time.Sleep(200 * time.Millisecond)
             ctx.KillAllSessions()
-            time.Sleep(500 * time.Millisecond)
+            // This generally shouldn't *do* anything other than
+            // clean up the PID files, as the killing would have
+            // been done already in KillAllSessions.
+            ctx.KillAllViaPidfiles()
             ctx.Close()
             done<-true
         }(_ctx)
@@ -312,7 +311,8 @@ func Shutdown(reason string) {
     for _, _ = range AllSyncContexts {
         <-done
     }
-    status.Printf("Exiting.\n")
+    status.Printf("Exiting.")
+    fmt.Println()
     os.Exit(1)
 }
 
