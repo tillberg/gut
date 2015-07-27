@@ -49,7 +49,7 @@ func GutDaemon(ctx *SyncContext, tailHash string, bindPort int) (err error) {
         fmt.Sprintf("--port=%d", bindPort),
         basePath,
     }
-    pid, _, err := ctx.QuoteDaemon("gut-daemon", ctx.GutArgs(args...)...)
+    pid, _, err := ctx.QuoteDaemonCwd("gut-daemon", "", ctx.GutArgs(args...)...)
     if err != nil { return err }
     return ctx.SaveDaemonPid("gut-daemon", pid)
 }

@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "math/rand"
+    "path/filepath"
     "strings"
 )
 
@@ -70,8 +71,8 @@ func KillPreviousProcess(ctx *SyncContext, name string) {
 
 func GetCmd(ctx *SyncContext, commands ...string) string {
     for _, command := range commands {
-        _, err := ctx.Output("which", command)
-        if err == nil {
+        _, _, retCode, err := ctx.Run("which", command)
+        if err == nil && retCode == 0 {
             return command
         }
     }
@@ -90,12 +91,102 @@ func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdBindPort int, g
         args = append(args, "-M", fmt.Sprintf("%d", autosshMonitorPort))
     }
     args = append(args, "-N", "-L", sshTunnelOpts, "-R", sshTunnelOpts, remote.SshAddress())
-    pid, _, err := local.QuoteDaemon(cmd, args...)
-    local.SaveDaemonPid(cmd, pid)
-    return err
+    pid, _, err := local.QuoteDaemonCwd(cmd, "", args...)
+    if err != nil { return err }
+    return local.SaveDaemonPid(cmd, pid)
+}
+
+var inotifyChangeEvents = []string{"modify", "attrib", "move", "create", "delete"}
+func inotifyArgs(ctx *SyncContext, monitor bool) []string {
+    args := []string{
+        "inotifywait",
+        "--quiet",
+        "--recursive",
+    }
+    if monitor {
+        args = append(args, "--monitor")
+        formatStr := "%w%f"
+        excludeStr := "\\.gut/"
+        if ctx.IsWindows() {
+            // inotify-win has slightly different semantics (and a completely different regex engine) than inotify-tools
+            formatStr = "%w\\%f"
+            excludeStr = "\\.gut($|\\\\)"
+        }
+        args = append(args, "--format", formatStr)
+        args = append(args, "--exclude", excludeStr)
+    }
+    if ctx.IsWindows() {
+        args = append(args, "--event", strings.Join(inotifyChangeEvents, ","))
+    } else {
+        for _, event := range inotifyChangeEvents {
+            args = append(args, "--event", event)
+        }
+    }
+    args = append(args, ".")
+    return args
+}
+
+var bytesNewline = []byte{'\n'}
+type LineBuf struct {
+    lineCallback func([]byte)
+    buf          []byte
+}
+func (m *LineBuf) Write(b []byte) (int, error) {
+    m.buf = append(m.buf, b...)
+    for {
+        indexNewline := bytes.Index(m.buf, bytesNewline)
+        if indexNewline < 0 { break }
+        line := m.buf[:indexNewline]
+        if indexNewline == len(m.buf) - 1 {
+            m.buf = m.buf[:0]
+        } else {
+            m.buf = m.buf[indexNewline+1:]
+        }
+        m.lineCallback(line)
+    }
+    return len(b), nil
+}
+func (m *LineBuf) Close() error {
+    if len(m.buf) > 0 {
+        m.Write(bytesNewline)
+    }
+    return nil
+}
+func NewLineBuf(lineCallback func([]byte)) *LineBuf {
+    return &LineBuf{lineCallback, []byte{}}
 }
 
 func WatchForChanges(ctx *SyncContext, fileEventCallback func(string)) (err error) {
+    watchType := GetCmd(ctx, "inotifywait", "fswatch")
+    args := []string{}
+    if watchType == "inotifywait" {
+        args = inotifyArgs(ctx, true)
+    } else if watchType == "fswatch" {
+        args = []string{"fswatch", "."}
+    } else {
+        if ctx.IsDarwin() {
+            panic("missing fswatch")
+        } else {
+            panic("missing inotifywait")
+        }
+    }
+    status := ctx.NewLogger(watchType)
+    watchedRoot := ctx.AbsSyncPath()
+    buf := NewLineBuf(func(b []byte) {
+        // status.Printf("Received: %q\n", string(b))
+        p := string(b)
+        if !filepath.IsAbs(p) {
+            p = filepath.Join(watchedRoot, p)
+        }
+        relPath, err := filepath.Rel(watchedRoot, p)
+        if err != nil { status.Bail(err) }
+        // status.Printf("relPath: %q from %q\n", relPath, watchedRoot)
+        fileEventCallback(relPath)
+    })
+    pid, _, err := ctx.QuoteDaemonCwdPipeOut(watchType, watchedRoot, buf, args...)
+    if err != nil { return err }
+    err = ctx.SaveDaemonPid(watchType, pid)
+    if err != nil { return err }
     return nil
 }
 

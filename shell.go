@@ -252,7 +252,7 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     }
     clearChanges()
     flushChanges := func() {
-
+        status.Printf("Pretending to flush changes...\n")
         clearChanges()
     }
 
@@ -269,7 +269,6 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
         } else {
             event = <-eventChan
         }
-        status.Printf("Event received: [%s]", event.filepath)
         parts := strings.Split(event.filepath, "/")
         skip := false
         for _, part := range parts {
@@ -277,6 +276,7 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             if part == ".gutignore" { changedIgnore[event.ctx] = true }
         }
         if skip { continue }
+        status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
         haveChanges = true
         ctxChanged, ok := changedPaths[event.ctx]
         if !ok {
@@ -304,7 +304,7 @@ func Shutdown(reason string) {
             ctx.KillAllViaPidfiles()
             time.Sleep(200 * time.Millisecond)
             ctx.KillAllSessions()
-            time.Sleep(1 * time.Second)
+            time.Sleep(500 * time.Millisecond)
             ctx.Close()
             done<-true
         }(_ctx)
