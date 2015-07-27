@@ -132,7 +132,7 @@ func GutCommit(ctx *SyncContext, prefix string, updateUntracked bool) (changed b
         lsFiles = strings.TrimSpace(lsFiles)
         if lsFiles != "" {
             for _, filename := range strings.Split(lsFiles, "\n") {
-                status.Printf("@(dim:Untracking newly-.gutignored) " + filename)
+                status.Printf("@(dim:Untracking newly-.gutignored) %s\n", filename)
                 rmArgs := []string{"rm", "--cached", "--ignore-unmatch", "--quiet", "--", filename}
                 err = ctx.GutQuote("rm--cached", rmArgs...)
                 if err != nil { return false, err }

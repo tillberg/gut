@@ -251,7 +251,14 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
     }
     clearChanges()
     flushChanges := func() {
-        status.Printf("Pretending to flush changes...\n")
+        for ctx, pathMap := range changedPaths {
+            paths := []string{}
+            for path, _ := range pathMap {
+                paths = append(paths, path)
+            }
+            _, changedThisIgnore := changedIgnore[ctx]
+            commitAndUpdate(ctx, paths, changedThisIgnore)
+        }
         clearChanges()
     }
 
@@ -271,8 +278,11 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
         parts := strings.Split(event.filepath, "/")
         skip := false
         for _, part := range parts {
-            if part == ".gut" { skip = true }
-            if part == ".gutignore" { changedIgnore[event.ctx] = true }
+            if part == ".gut" {
+                skip = true
+            } else if part == ".gutignore" {
+                changedIgnore[event.ctx] = true
+            }
         }
         if skip { continue }
         status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
