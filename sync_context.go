@@ -56,8 +56,10 @@ func (ctx *SyncContext) String() string {
 }
 
 func (ctx *SyncContext) BranchName() string {
-    hostname := ctx.Hostname()
-    if hostname == "" { hostname = "localhost" }
+	hostname := ctx.Hostname()
+	if hostname == "" {
+		hostname = "localhost"
+	}
 	return fmt.Sprintf("%s-%s", hostname, fmt.Sprintf("%x", md5.Sum([]byte(ctx.String())))[:8])
 }
 

@@ -124,11 +124,15 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 
 	for _, ctx := range allContexts {
 		_, err = EnsureBuild(local, ctx)
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 	}
 
 	ports, err := FindOpenPorts(1, allContexts...)
-	if err != nil { status.Bail(err) }
+	if err != nil {
+		status.Bail(err)
+	}
 	// status.Printf("Using ports %v\n", ports)
 	gutdPort := ports[0]
 	gutdAddr := fmt.Sprintf("localhost:%d", gutdPort)
@@ -141,7 +145,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	for _, ctx := range remotes {
 		if !ctx.IsLocal() {
 			err = ctx.ReverseTunnel(gutdAddr, gutdAddr)
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 		}
 	}
 
@@ -149,7 +155,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	tailHash := ""
 	var tailHashFoundOn *SyncContext
 	localTailHash, err := local.GetTailHash()
-	if err != nil { status.Bail(err) }
+	if err != nil {
+		status.Bail(err)
+	}
 	if localTailHash != "" {
 		tailHash = localTailHash
 		tailHashFoundOn = local
@@ -157,10 +165,14 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	contextsNeedInit := []*SyncContext{}
 	for _, ctx := range remotes {
 		myTailHash, err := ctx.GetTailHash()
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 		if myTailHash == "" {
 			err = ctx.AssertSyncFolderIsEmpty()
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			contextsNeedInit = append(contextsNeedInit, ctx)
 		} else {
 			if tailHash == "" {
@@ -176,7 +188,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
 				}
 				err = ctx.GutSetupOrigin(repoName, gutdPort)
-				if err != nil { status.Bail(err) }
+				if err != nil {
+					status.Bail(err)
+				}
 			}
 		}
 	}
@@ -184,38 +198,62 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		if tailHash == "" {
 			status.Printf("@(dim:No existing gut repo found. Initializing gut repo in %s.)\n", local.SyncPathAnsi())
 			err = local.GutInit()
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			err = local.GutSetupOrigin(repoName, gutdPort)
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			err = local.GutEnsureInitialCommit()
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			tailHash, err = local.GetTailHash()
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			if tailHash == "" {
 				Shutdown(status.Colorify("Failed to initialize new gut repo."))
 			}
 			tailHashFoundOn = local
 		} else {
 			err = local.GutInit()
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			err = local.GutSetupOrigin(repoName, gutdPort)
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			err = tailHashFoundOn.GutPush()
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 			err = local.GutCheckoutAsMaster(tailHashFoundOn.BranchName())
-			if err != nil { status.Bail(err) }
+			if err != nil {
+				status.Bail(err)
+			}
 		}
 	} else {
 		err = local.GutSetupOrigin(repoName, gutdPort)
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 	}
 	for _, ctx := range contextsNeedInit {
 		err = ctx.GutInit()
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 		err = ctx.GutSetupOrigin(repoName, gutdPort)
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 		err = ctx.GutPull()
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 	}
 
 	type FileEvent struct {
@@ -240,13 +278,19 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			prefix = "."
 		}
 		changed, err := src.GutCommit(prefix, updateUntracked)
-		if err != nil { status.Bail(err) }
+		if err != nil {
+			status.Bail(err)
+		}
 		if changed {
 			if src != local {
 				err = src.GutPush()
-				if err != nil { status.Bail(err) }
+				if err != nil {
+					status.Bail(err)
+				}
 				err = local.GutMerge(src.BranchName())
-				if err != nil { status.Bail(err) }
+				if err != nil {
+					status.Bail(err)
+				}
 			}
 			done := make(chan error)
 			for _, _ctx := range remotes {
@@ -267,7 +311,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 						eventChan <- FileEvent{ctx, ".gutignore"}
 						err = nil
 					}
-					if err != nil { status.Bail(err) }
+					if err != nil {
+						status.Bail(err)
+					}
 				}
 			}
 		}
