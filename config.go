@@ -15,7 +15,7 @@ const MsysgitVersion = "Git-1.9.5-preview20150319"
 const InotifyWinRepoUrl = "https://github.com/thekid/inotify-win.git"
 const InotifyWinVersion = "9b547cfde0f546df8abeebf47ec36f36d7bd91ef"
 
-const GutPath = ".guts"
+const GutPath = "~/.guts"
 const GutSrcPath = GutPath + "/gut-src"
 const GutSrcTmpPath = GutPath + "/gut-src-tmp"
 const GutWinSrcPath = GutPath + "/gut-win-src"

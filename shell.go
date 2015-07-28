@@ -166,9 +166,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			} else {
 				if tailHash != myTailHash {
 					status.Printf("@(error:Found different gut repo base commits:)\n")
-					status.Printf("@(commit:%s) @(error:on) %s\n",
+					status.Printf("@(commit:%s) @(error:at) %s\n",
 						TrimCommit(tailHash), tailHashFoundOn.SyncPathAnsi())
-					status.Printf("@(commit:%s) @(error:on) %s\n",
+					status.Printf("@(commit:%s) @(error:at) %s\n",
 						TrimCommit(myTailHash), ctx.SyncPathAnsi())
 					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
 				}
