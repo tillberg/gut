@@ -202,11 +202,15 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
         err = GutInit(ctx)
         if err != nil { status.Bail(err) }
         setupGutOrigin(ctx)
-        err = GutFetch(ctx)
-        if err != nil { status.Bail(err) }
-        err = GutMerge(ctx, "origin/master")
+        err = ctx.GutPull()
         if err != nil { status.Bail(err) }
     }
+
+    type FileEvent struct {
+        ctx *SyncContext
+        filepath string
+    }
+    eventChan := make(chan FileEvent)
 
     commitAndUpdate := func(src *SyncContext, changedPaths []string, updateUntracked bool) (err error) {
         prefix := CommonPathPrefix(changedPaths...)
@@ -236,27 +240,21 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
             for _, _ctx := range remotes {
                 if _ctx != src {
                     go func(ctx *SyncContext) {
-                        err = GutFetch(ctx)
-                        if err != nil {
-                            done<-err
-                            return
-                        }
-                        err = GutMerge(ctx, "origin/master")
-                        if err == NeedsCommitError {
-                            status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
-                            // Queue up an event to force checking for changes. Saying that
-                            // .gutignore changed is a kludgy way to get it to check for files
-                            // that should be untracked.
-                            eventChan<-FileEvent{ctx, ".gutignore"}
-                            err = nil
-                        }
-                        done<-err
+                        done<-ctx.GutPull()
                     }(_ctx)
                 }
             }
             for _, ctx := range remotes {
                 if ctx != src {
                     err = <-done
+                    if err == NeedsCommitError {
+                        status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
+                        // Queue up an event to force checking for changes. Saying that
+                        // .gutignore changed is a kludgy way to get it to check for files
+                        // that should be untracked.
+                        eventChan<-FileEvent{ctx, ".gutignore"}
+                        err = nil
+                    }
                     if err != nil { status.Bail(err) }
                 }
             }
@@ -264,11 +262,6 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
         return nil
     }
 
-    type FileEvent struct {
-        ctx *SyncContext
-        filepath string
-    }
-    eventChan := make(chan FileEvent)
     fileEventCallbackGen := func(ctx *SyncContext) func(filepath string) {
         return func(filepath string) {
             eventChan<-FileEvent{ctx, filepath}
@@ -328,7 +321,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
             }
         }
         if skip { continue }
-        status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
+        // status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
         haveChanges = true
         ctxChanged, ok := changedPaths[event.ctx]
         if !ok {

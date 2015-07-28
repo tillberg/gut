@@ -134,6 +134,12 @@ func GutFetch(ctx *SyncContext) (err error) {
     return err
 }
 
+func (ctx *SyncContext) GutPull() (err error) {
+    err = GutFetch(ctx)
+    if err != nil { return err }
+    return GutMerge(ctx, "origin/master")
+}
+
 func GutCommit(ctx *SyncContext, prefix string, updateUntracked bool) (changed bool, err error) {
     status := ctx.NewLogger("commit")
     headBefore, err := ctx.GutRevParseHead()
