@@ -213,3 +213,19 @@ func IsGitCommand(s string) bool {
 	}
 	return false
 }
+
+var DangerousGitCommands = []string{
+	"reset",
+	"checkout",
+	"clean",
+	"rm",
+}
+
+func IsDangerousGitCommand(s string) bool {
+	for _, a := range DangerousGitCommands {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}

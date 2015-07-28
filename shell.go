@@ -407,22 +407,45 @@ func Shutdown(reason string) {
 	os.Exit(1)
 }
 
+func initLog() {
+}
+
 func main() {
 	log.EnableMultilineMode()
 	log.EnableColorTemplate()
 	log.AddAnsiColorCode("error", 31)
 	log.AddAnsiColorCode("commit", 32)
-	status := log.New(os.Stderr, "", 0)
+	log.AddAnsiColorCode("path", 36)
 	var args []string = os.Args[1:]
 	if len(args) == 0 {
-		status.Fatalln("You must specify a gut-command, e.g. `gut sync ...`")
+		fmt.Println("You must specify a gut-command, e.g. `gut sync ...`")
+		os.Exit(1)
 	}
 	var cmd = args[0]
 	if IsGitCommand(cmd) {
+		if IsDangerousGitCommand(cmd) {
+			if len(args) < 2 || args[1] != "--danger" {
+				status := log.New(os.Stderr, "", 0)
+				status.Printf("@(dim:In order to prevent damage caused by accidentally using `)gut %s ...@(dim:`)\n", cmd)
+				status.Printf("@(dim:in cases where `)git %s ...@(dim:` was intended, you must append `)--danger@(dim:`)\n", cmd)
+				status.Printf("@(dim:immediately after the command, i.e. `)gut %s --danger ...@(dim:`.)\n", cmd)
+				status.Printf("@(dim:Alternatively, you could invoke) gut @(dim:directly at) @(path:%s)@(dim:.)\n", GutExePath)
+				status.Printf("@(dim:The commands that require this flag are:) %s\n", strings.Join(DangerousGitCommands, " "))
+				os.Exit(1)
+			}
+			// Split the "--danger" flag out before handing off the args list to the gut-command:
+			if len(args) > 2 {
+				args = append(args[:1], args[2:]...)
+			} else {
+				args = args[:1]
+			}
+		}
 		var gutExe = PathInUserHome(GutExePath)
 		syscall.Exec(gutExe, append([]string{gutExe}, args...), os.Environ())
-		status.Fatalf("Failed to exec %s", gutExe)
+		fmt.Printf("Failed to exec %s", gutExe)
+		os.Exit(1)
 	}
+	status := log.New(os.Stderr, "", 0)
 	args = args[1:]
 	var argsRemaining, err = flags.ParseArgs(&OptsCommon, args)
 	if err != nil {
