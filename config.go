@@ -43,7 +43,12 @@ const MaxRandomPort = 34999
 const DefaultGutignore = ("# Added by `gut sync` during repo init:" + `
 *.lock
 .#*
+
+# Various compiled resources:
 *.pyc
+*.o
+*.a
+*.so
 `)
 
 var AllGutCommands = [...]string{

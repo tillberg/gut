@@ -4,6 +4,6 @@ import (
 	"github.com/tillberg/ansi-log"
 )
 
-func MissingDependency(ctx *SyncContext, name string) {
+func (ctx *SyncContext) MissingDependency(name string) {
 	log.Fatalf("Missing dependency: %s", name)
 }

@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-func EnsureGutFolders(ctx *SyncContext) (err error) {
+func (ctx *SyncContext) EnsureGutFolders() (err error) {
 	err = ctx.Mkdirp(GutSrcPath)
 	if err != nil {
 		return err
@@ -119,7 +119,7 @@ func GitHardResetAndClean(local *SyncContext, localPath string, repoUrl string, 
 func GitCloneUpdate(local *SyncContext, localPath string, repoUrl string, version string) (err error) {
 	status := local.NewLogger("")
 	defer status.Close()
-	err = EnsureGutFolders(local)
+	err = local.EnsureGutFolders()
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func GutBuildPrepare(local *SyncContext, ctx *SyncContext) (err error) {
 	return err
 }
 
-func GutBuild(ctx *SyncContext, buildPath string) (err error) {
+func (ctx *SyncContext) GutBuild(buildPath string) (err error) {
 	buildPath = ctx.AbsPath(buildPath)
 	gutDistPath := ctx.AbsPath(GutDistPath)
 	var installPrefix string
@@ -213,7 +213,7 @@ func GutBuild(ctx *SyncContext, buildPath string) (err error) {
 			return err
 		}
 	}
-	parallelism := GetNumCores(ctx)
+	parallelism := ctx.GetNumCores()
 	status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)\n", parallelism)
 	err = doMake("build", installPrefix, "-j", parallelism)
 	if err != nil {

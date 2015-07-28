@@ -34,7 +34,7 @@ func (ctx *SyncContext) GutRevParseHead() (commit string, err error) {
 
 // Start a git-daemon on the host, bound to port gutd_bind_port on the *localhost* network interface only.
 // `autossh` will create a tunnel to expose this port as gutd_connect_port on the other host.
-func GutDaemon(ctx *SyncContext, repoName string, bindPort int) (err error) {
+func (ctx *SyncContext) GutDaemon(repoName string, bindPort int) (err error) {
 	basePath := ctx.AbsPath(GutDaemonPath)
 	ctx.Mkdirp(basePath)
 	symlinkPath := path.Join(basePath, repoName)
@@ -69,7 +69,7 @@ func GutDaemon(ctx *SyncContext, repoName string, bindPort int) (err error) {
 	return ctx.SaveDaemonPid("daemon", pid)
 }
 
-func GutInit(ctx *SyncContext) (err error) {
+func (ctx *SyncContext) GutInit() (err error) {
 	ctx.Mkdirp(ctx.AbsSyncPath())
 	exists, err := ctx.PathExists(path.Join(ctx.AbsSyncPath(), ".gut"))
 	if err != nil {
@@ -81,7 +81,7 @@ func GutInit(ctx *SyncContext) (err error) {
 	return nil
 }
 
-func GutSetupOrigin(ctx *SyncContext, repoName string, connectPort int) (err error) {
+func (ctx *SyncContext) GutSetupOrigin(repoName string, connectPort int) (err error) {
 	originUrl := fmt.Sprintf("gut://localhost:%d/%s/", connectPort, repoName)
 	out, err := ctx.GutOutput("remote")
 	if err != nil {
@@ -113,7 +113,7 @@ func GutSetupOrigin(ctx *SyncContext, repoName string, connectPort int) (err err
 
 var NeedsCommitError = errors.New("Needs commit before pull.")
 
-func GutMerge(ctx *SyncContext, branch string) (err error) {
+func (ctx *SyncContext) GutMerge(branch string) (err error) {
 	status := ctx.NewLogger("merge")
 	status.Printf("@(dim:Merging changes to) %s@(dim:...)", ctx.NameAnsi())
 	mergeArgs := []string{
@@ -137,13 +137,13 @@ func GutMerge(ctx *SyncContext, branch string) (err error) {
 	return nil
 }
 
-func GutCheckout(ctx *SyncContext, branch string) (err error) {
+func (ctx *SyncContext) GutCheckout(branch string) (err error) {
 	status := ctx.NewLogger("checkout")
 	status.Printf("@(dim:Checking out) %s @(dim:on) %s@(dim:...)\n", branch, ctx.NameAnsi())
 	return ctx.GutQuote("checkout", "checkout", branch)
 }
 
-func GutPush(ctx *SyncContext) (err error) {
+func (ctx *SyncContext) GutPush() (err error) {
 	status := ctx.NewLogger("push")
 	status.Printf("@(dim:Pushing changes from) %s@(dim:...)\n", ctx.NameAnsi())
 	return ctx.GutQuote("push", "push", "origin", "master:"+ctx.BranchName(), "--progress")
@@ -151,7 +151,7 @@ func GutPush(ctx *SyncContext) (err error) {
 
 var needsCommitStr = "Your local changes to the following files would be overwritten"
 
-func GutFetch(ctx *SyncContext) (err error) {
+func (ctx *SyncContext) GutFetch() (err error) {
 	status := ctx.NewLogger("fetch")
 	status.Printf("@(dim:Fetching changes to) %s@(dim:...)\n", ctx.NameAnsi())
 	_, stderr, retCode, err := ctx.GutQuoteBuf("fetch", "fetch", "origin", "--progress")
@@ -162,14 +162,14 @@ func GutFetch(ctx *SyncContext) (err error) {
 }
 
 func (ctx *SyncContext) GutPull() (err error) {
-	err = GutFetch(ctx)
+	err = ctx.GutFetch()
 	if err != nil {
 		return err
 	}
-	return GutMerge(ctx, "origin/master")
+	return ctx.GutMerge("origin/master")
 }
 
-func GutCommit(ctx *SyncContext, prefix string, updateUntracked bool) (changed bool, err error) {
+func (ctx *SyncContext) GutCommit(prefix string, updateUntracked bool) (changed bool, err error) {
 	status := ctx.NewLogger("commit")
 	headBefore, err := ctx.GutRevParseHead()
 	if err != nil {
@@ -215,7 +215,7 @@ func GutCommit(ctx *SyncContext, prefix string, updateUntracked bool) (changed b
 	return madeACommit, nil
 }
 
-func GutEnsureInitialCommit(ctx *SyncContext) (err error) {
+func (ctx *SyncContext) GutEnsureInitialCommit() (err error) {
 	status := ctx.NewLogger("firstcommit")
 	status.Printf("@(dim:Writing first commit on) %s@(dim:.)\n", ctx.SyncPathAnsi())
 	head, err := ctx.GutRevParseHead()

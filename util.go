@@ -19,7 +19,7 @@ func WindowsPathToMingwPath(p string) string {
 
 const defaultNumCores = "4"
 
-func GetNumCores(ctx *SyncContext) string {
+func (ctx *SyncContext) GetNumCores() string {
 	if ctx.IsWindows() {
 		out, err := ctx.Output("wmic", "CPU", "Get", "NumberOfLogicalProcessors", "/Format:List")
 		if err != nil {
@@ -72,11 +72,7 @@ func FindOpenPorts(numPorts int, ctxs ...*SyncContext) ([]int, error) {
 	return nil, errors.New("Not enough available ports found")
 }
 
-func KillPreviousProcess(ctx *SyncContext, name string) {
-
-}
-
-func GetCmd(ctx *SyncContext, commands ...string) string {
+func (ctx *SyncContext) GetCmd(commands ...string) string {
 	for _, command := range commands {
 		_, _, retCode, err := ctx.Run("which", command)
 		if err == nil && retCode == 0 {
@@ -96,23 +92,22 @@ func RandSeq(n int) string {
 	return string(b)
 }
 
-func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdPort int, autosshMonitorPort int) (err error) {
-	cmd := GetCmd(local, "autossh", "ssh")
+func (ctx *SyncContext) StartSshTunnel(remote *SyncContext, gutdPort int, autosshMonitorPort int) (err error) {
+	cmd := ctx.GetCmd("autossh", "ssh")
 	if cmd == "" {
-		MissingDependency(local, "ssh")
+		ctx.MissingDependency("ssh")
 	}
-	KillPreviousProcess(local, cmd)
 	sshTunnelOpts := fmt.Sprintf("%d:localhost:%d", gutdPort, gutdPort)
 	args := []string{cmd}
-	if cmd == "autossh" && local.IsDarwin() {
+	if cmd == "autossh" && ctx.IsDarwin() {
 		args = append(args, "-M", fmt.Sprintf("%d", autosshMonitorPort))
 	}
 	args = append(args, "-N", "-R", sshTunnelOpts, remote.SshAddress())
-	pid, _, err := local.QuoteDaemonCwd(cmd, "", args...)
+	pid, _, err := ctx.QuoteDaemonCwd(cmd, "", args...)
 	if err != nil {
 		return err
 	}
-	return local.SaveDaemonPid(cmd, pid)
+	return ctx.SaveDaemonPid(cmd, pid)
 }
 
 var inotifyChangeEvents = []string{"modify", "attrib", "move", "create", "delete"}
@@ -180,8 +175,8 @@ func NewLineBuf(lineCallback func([]byte)) *LineBuf {
 	return &LineBuf{lineCallback, []byte{}}
 }
 
-func WatchForChanges(ctx *SyncContext, fileEventCallback func(string)) (err error) {
-	watchType := GetCmd(ctx, "inotifywait", "fswatch")
+func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) (err error) {
+	watchType := ctx.GetCmd("inotifywait", "fswatch")
 	args := []string{}
 	if watchType == "inotifywait" {
 		args = inotifyArgs(ctx, true)
@@ -237,7 +232,7 @@ func TrimCommit(commit string) string {
 	return commit
 }
 
-func AssertSyncFolderIsEmpty(ctx *SyncContext) (err error) {
+func (ctx *SyncContext) AssertSyncFolderIsEmpty() (err error) {
 	p := ctx.AbsSyncPath()
 	bail := func() {
 		ctx.Logger().Printf("@(error:Refusing to initialize) @(path:%s) @(error:on) %s ", p, ctx.NameAnsi())

@@ -49,7 +49,7 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 		}
 	}
 	status.Printf("@(dim:Need to build gut on) %s@(dim:.)\n", ctx.NameAnsi())
-	err = EnsureGutFolders(ctx)
+	err = ctx.EnsureGutFolders()
 	if err != nil {
 		return false, err
 	}
@@ -85,7 +85,7 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 		}
 		status.Printf("@(dim: done.)\n")
 	}
-	err = GutBuild(ctx, buildPath)
+	err = ctx.GutBuild(buildPath)
 	if err != nil {
 		return false, err
 	}
@@ -96,14 +96,6 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 	}
 	status.Printf("@(dim: done.)\n")
 	return true, nil
-}
-
-func doSession(ctx *SyncContext, done chan bool) {
-	err := ctx.QuoteShell("test", "echo -n 'working... '; sleep 0.01; hostname")
-	if err != nil {
-		log.Fatalf("unable to connect: %s", err)
-	}
-	done <- true
 }
 
 const commitDebounceDuration = 100 * time.Millisecond
@@ -132,59 +124,41 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 
 	for _, ctx := range allContexts {
 		_, err = EnsureBuild(local, ctx)
-		if err != nil {
-			status.Bail(err)
-		}
+		if err != nil { status.Bail(err) }
 	}
 
 	ports, err := FindOpenPorts(2, allContexts...)
-	if err != nil {
-		status.Bail(err)
-	}
+	if err != nil { status.Bail(err) }
 	// status.Printf("Using ports %v\n", ports)
 	gutdPort := ports[0]
 	autosshMonitorPort := ports[1]
 
 	for _, ctx := range allContexts {
 		if !ctx.IsLocal() {
-			err = StartSshTunnel(local, ctx, gutdPort, autosshMonitorPort)
-			if err != nil {
-				status.Bail(err)
-			}
+			err = local.StartSshTunnel(ctx, gutdPort, autosshMonitorPort)
+			if err != nil { status.Bail(err) }
 		}
 	}
 
 	repoName := RandSeq(12)
-	GutDaemon(local, repoName, gutdPort)
+	local.GutDaemon(repoName, gutdPort)
 
 	// Find tailHash, if any. Bail if there are conflicting tailHashes.
 	tailHash := ""
 	var tailHashFoundOn *SyncContext
 	localTailHash, err := local.GetTailHash()
-	if err != nil {
-		status.Bail(err)
-	}
+	if err != nil { status.Bail(err) }
 	if localTailHash != "" {
 		tailHash = localTailHash
 		tailHashFoundOn = local
 	}
-	setupGutOrigin := func(ctx *SyncContext) {
-		_err := GutSetupOrigin(ctx, repoName, gutdPort)
-		if _err != nil {
-			status.Bail(_err)
-		}
-	}
 	contextsNeedInit := []*SyncContext{}
 	for _, ctx := range remotes {
 		myTailHash, err := ctx.GetTailHash()
-		if err != nil {
-			status.Bail(err)
-		}
+		if err != nil { status.Bail(err) }
 		if myTailHash == "" {
-			err = AssertSyncFolderIsEmpty(ctx)
-			if err != nil {
-				status.Bail(err)
-			}
+			err = ctx.AssertSyncFolderIsEmpty()
+			if err != nil { status.Bail(err) }
 			contextsNeedInit = append(contextsNeedInit, ctx)
 		} else {
 			if tailHash == "" {
@@ -199,58 +173,47 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 						TrimCommit(myTailHash), ctx.SyncPathAnsi())
 					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
 				}
-				setupGutOrigin(ctx)
+				err = ctx.GutSetupOrigin(repoName, gutdPort)
+				if err != nil { status.Bail(err) }
 			}
 		}
 	}
 	if localTailHash == "" {
 		if tailHash == "" {
 			status.Printf("@(dim:No existing gut repo found. Initializing gut repo in %s.)\n", local.SyncPathAnsi())
-			err = GutInit(local)
-			if err != nil {
-				status.Bail(err)
-			}
-			setupGutOrigin(local)
-			err = GutEnsureInitialCommit(local)
-			if err != nil {
-				status.Bail(err)
-			}
+			err = local.GutInit()
+			if err != nil { status.Bail(err) }
+			err = local.GutSetupOrigin(repoName, gutdPort)
+			if err != nil { status.Bail(err) }
+			err = local.GutEnsureInitialCommit()
+			if err != nil { status.Bail(err) }
 			tailHash, err = local.GetTailHash()
-			if err != nil {
-				status.Bail(err)
-			}
+			if err != nil { status.Bail(err) }
 			if tailHash == "" {
 				Shutdown(status.Colorify("Failed to initialize new gut repo."))
 			}
 			tailHashFoundOn = local
 		} else {
-			err = GutInit(local)
-			if err != nil {
-				status.Bail(err)
-			}
-			setupGutOrigin(local)
-			err = GutPush(tailHashFoundOn)
-			if err != nil {
-				status.Bail(err)
-			}
-			err = GutCheckout(local, tailHashFoundOn.BranchName())
-			if err != nil {
-				status.Bail(err)
-			}
+			err = local.GutInit()
+			if err != nil { status.Bail(err) }
+			err = local.GutSetupOrigin(repoName, gutdPort)
+			if err != nil { status.Bail(err) }
+			err = tailHashFoundOn.GutPush()
+			if err != nil { status.Bail(err) }
+			err = local.GutCheckout(tailHashFoundOn.BranchName())
+			if err != nil { status.Bail(err) }
 		}
 	} else {
-		setupGutOrigin(local)
+		err = local.GutSetupOrigin(repoName, gutdPort)
+		if err != nil { status.Bail(err) }
 	}
 	for _, ctx := range contextsNeedInit {
-		err = GutInit(ctx)
-		if err != nil {
-			status.Bail(err)
-		}
-		setupGutOrigin(ctx)
+		err = ctx.GutInit()
+		if err != nil { status.Bail(err) }
+		err = ctx.GutSetupOrigin(repoName, gutdPort)
+		if err != nil { status.Bail(err) }
 		err = ctx.GutPull()
-		if err != nil {
-			status.Bail(err)
-		}
+		if err != nil { status.Bail(err) }
 	}
 
 	type FileEvent struct {
@@ -274,20 +237,14 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		if prefix == "" {
 			prefix = "."
 		}
-		changed, err := GutCommit(src, prefix, updateUntracked)
-		if err != nil {
-			status.Bail(err)
-		}
+		changed, err := src.GutCommit(prefix, updateUntracked)
+		if err != nil { status.Bail(err) }
 		if changed {
 			if src != local {
-				err = GutPush(src)
-				if err != nil {
-					status.Bail(err)
-				}
-				err = GutMerge(local, src.BranchName())
-				if err != nil {
-					status.Bail(err)
-				}
+				err = src.GutPush()
+				if err != nil { status.Bail(err) }
+				err = local.GutMerge(src.BranchName())
+				if err != nil { status.Bail(err) }
 			}
 			done := make(chan error)
 			for _, _ctx := range remotes {
@@ -308,9 +265,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 						eventChan <- FileEvent{ctx, ".gutignore"}
 						err = nil
 					}
-					if err != nil {
-						status.Bail(err)
-					}
+					if err != nil { status.Bail(err) }
 				}
 			}
 		}
@@ -324,7 +279,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 
 	for _, ctx := range allContexts {
-		WatchForChanges(ctx, fileEventCallbackGen(ctx))
+		ctx.WatchForChanges(fileEventCallbackGen(ctx))
 	}
 	// The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
 	// commit_and_update calls below and the time that the filesystem watches are attached.
