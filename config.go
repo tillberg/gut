@@ -1,11 +1,5 @@
 package main
 
-import (
-	"log"
-	"os/user"
-	"path"
-)
-
 const GitRepoUrl = "https://github.com/git/git.git"
 const GitVersion = "v2.5.0"
 const GitWinRepoUrl = "https://github.com/git-for-windows/git.git"
@@ -25,14 +19,6 @@ const GutDistPath = GutPath + "/gut-build"
 const PidfilesPath = GutPath + "/pidfiles"
 const GutExePath = GutDistPath + "/bin/gut"
 const GutDaemonPath = GutPath + "/repos"
-
-func PathInUserHome(subpath string) string {
-	usr, err := user.Current()
-	if err != nil {
-		log.Fatal(err)
-	}
-	return path.Join(usr.HomeDir, subpath)
-}
 
 const MinRandomPort = 34000
 const MaxRandomPort = 34999

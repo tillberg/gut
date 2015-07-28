@@ -7,6 +7,8 @@ import (
 	"github.com/tillberg/bismuth"
 	"os"
 	"os/signal"
+	"os/user"
+	"path"
 	"strings"
 	"sync"
 	"syscall"
@@ -440,7 +442,11 @@ func main() {
 				args = args[:1]
 			}
 		}
-		var gutExe = PathInUserHome(GutExePath)
+		usr, err := user.Current()
+		if err != nil {
+			log.Fatal(err)
+		}
+		var gutExe = path.Join(usr.HomeDir, GutExePath[2:])
 		syscall.Exec(gutExe, append([]string{gutExe}, args...), os.Environ())
 		fmt.Printf("Failed to exec %s", gutExe)
 		os.Exit(1)
