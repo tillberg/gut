@@ -1,6 +1,7 @@
 package main
 
 import (
+    "crypto/md5"
     "errors"
     "fmt"
     "path"
@@ -53,6 +54,10 @@ func (ctx *SyncContext) String() string {
     return fmt.Sprintf("{SyncContext local %s}", ctx.syncPath)
 }
 
+func (ctx *SyncContext) BranchName() string {
+    return fmt.Sprintf("m%x", md5.Sum([]byte(ctx.String())))
+}
+
 func (ctx *SyncContext) PathAnsi(p string) string {
     if !ctx.IsLocal() {
         return fmt.Sprintf(ctx.Logger().Colorify("%s@(dim::)@(path:%s)"), ctx.NameAnsi(), p)
@@ -95,7 +100,7 @@ func (ctx *SyncContext) GutQuoteBuf(suffix string, args ...string) (stdout []byt
 }
 
 func (ctx *SyncContext) GutQuote(suffix string, args ...string) error {
-    return ctx.QuoteCwd("gut-" + suffix, ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
+    return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }
 
 func (ctx *SyncContext) getPidfilePath(name string) string {

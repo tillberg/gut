@@ -79,18 +79,27 @@ func GetCmd(ctx *SyncContext, commands ...string) string {
     return ""
 }
 
-func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdBindPort int, gutdConnectPort int, autosshMonitorPort int) (err error) {
+var letters = []rune("abcdefghijklmnopqrstuvwxyz")
+func RandSeq(n int) string {
+    b := make([]rune, n)
+    for i := range b {
+        b[i] = letters[rand.Intn(len(letters))]
+    }
+    return string(b)
+}
+
+func StartSshTunnel(local *SyncContext, remote *SyncContext, gutdPort int, autosshMonitorPort int) (err error) {
     cmd := GetCmd(local, "autossh", "ssh")
     if cmd == "" {
         MissingDependency(local, "ssh")
     }
     KillPreviousProcess(local, cmd)
-    sshTunnelOpts := fmt.Sprintf("%d:localhost:%d", gutdConnectPort, gutdBindPort)
+    sshTunnelOpts := fmt.Sprintf("%d:localhost:%d", gutdPort, gutdPort)
     args := []string{cmd}
     if cmd == "autossh" && local.IsDarwin() {
         args = append(args, "-M", fmt.Sprintf("%d", autosshMonitorPort))
     }
-    args = append(args, "-N", "-L", sshTunnelOpts, "-R", sshTunnelOpts, remote.SshAddress())
+    args = append(args, "-N", "-R", sshTunnelOpts, remote.SshAddress())
     pid, _, err := local.QuoteDaemonCwd(cmd, "", args...)
     if err != nil { return err }
     return local.SaveDaemonPid(cmd, pid)
@@ -171,7 +180,13 @@ func WatchForChanges(ctx *SyncContext, fileEventCallback func(string)) (err erro
         }
     }
     status := ctx.NewLogger(watchType)
-    watchedRoot := ctx.AbsSyncPath()
+    watchedRoot := ""
+    if ctx.IsWindows() {
+        watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "cmd", "/c", "cd ,")
+    } else {
+        watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "pwd", "-P")
+    }
+    if err != nil { return err }
     buf := NewLineBuf(func(b []byte) {
         // status.Printf("Received: %q\n", string(b))
         p := string(b)

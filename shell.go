@@ -1,7 +1,6 @@
 package main
 
 import (
-    "errors"
     "fmt"
     "io"
     "os"
@@ -12,6 +11,7 @@ import (
     "time"
     "github.com/jessevdk/go-flags"
     "github.com/tillberg/ansi-log"
+    "github.com/tillberg/bismuth"
 )
 
 var OptsCommon struct {
@@ -26,7 +26,6 @@ var OptsSync struct {
     Dev bool `long:"dev"`
     Positional struct {
         LocalPath  string
-        RemotePath string
     } `positional-args:"yes" required:"yes"`
 }
 
@@ -92,109 +91,124 @@ func doSession(ctx *SyncContext, done chan bool) {
 }
 
 const commitDebounceDuration = 100 * time.Millisecond
-func Sync(local *SyncContext, remote *SyncContext) (err error) {
+func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
     status := local.NewLogger("sync")
     defer status.Close()
-    status.Printf("@(dim:Syncing) %s @(dim:with) %s\n", local.SyncPathAnsi(), remote.SyncPathAnsi())
+    hostsStr := local.SyncPathAnsi()
+    commaStr := status.Colorify("@(dim:, )")
+    andStr := status.Colorify("@(dim:and )")
+    for i, ctx := range remotes {
+        if len(remotes) >= 2 {
+            hostsStr += commaStr
+        }
+        if i == len(remotes) - 1 {
+            if len(remotes) < 2 {
+                hostsStr += " "
+            }
+            hostsStr += andStr
+        }
+        hostsStr += ctx.SyncPathAnsi()
+    }
+    status.Printf("@(dim:Starting gut-sync between) %s@(dim:.)\n", hostsStr)
 
-    _, err = EnsureBuild(local, local)
-    if err != nil { status.Bail(err) }
-    _, err = EnsureBuild(local, remote)
-    if err != nil { status.Bail(err) }
+    allContexts := append([]*SyncContext{local}, remotes...)
 
-    ports, err := FindOpenPorts(3, local, remote)
+    for _, ctx := range allContexts {
+        _, err = EnsureBuild(local, ctx)
+        if err != nil { status.Bail(err) }
+    }
+
+    ports, err := FindOpenPorts(2, allContexts...)
     if err != nil { status.Bail(err) }
     // status.Printf("Using ports %v\n", ports)
-    gutdBindPort := ports[0]
-    gutdConnectPort := ports[1]
-    autosshMonitorPort := ports[2]
+    gutdPort := ports[0]
+    autosshMonitorPort := ports[1]
 
-    err = StartSshTunnel(local, remote, gutdBindPort, gutdConnectPort, autosshMonitorPort)
-    if err != nil { status.Bail(err) }
-
-    localTailHash, err := GetTailHash(local)
-    if err != nil { status.Bail(err) }
-    remoteTailHash, err := GetTailHash(remote)
-    if err != nil { status.Bail(err) }
-    tailHash := ""
-
-    startGutDaemon := func(ctx *SyncContext) error { return GutDaemon(ctx, tailHash, gutdBindPort) }
-    setupGutOrigin := func(ctx *SyncContext) error { return GutSetupOrigin(ctx, tailHash, gutdConnectPort) }
-    crossInit := func(src *SyncContext, dest *SyncContext) (err error) {
-        err = startGutDaemon(src)
-        if err != nil { status.Bail(err) }
-        err = GutInit(dest)
-        if err != nil { status.Bail(err) }
-        err = setupGutOrigin(dest)
-        if err != nil { status.Bail(err) }
-        time.Sleep(2) // Give the gut-daemon and SSH tunnel a moment to start up
-        err = GutPull(dest)
-        if err != nil { status.Bail(err) }
-        err = startGutDaemon(dest)
-        return err
+    for _, ctx := range allContexts {
+        if !ctx.IsLocal() {
+            err = StartSshTunnel(local, ctx, gutdPort, autosshMonitorPort)
+            if err != nil { status.Bail(err) }
+        }
     }
 
-    if localTailHash == "" || localTailHash != remoteTailHash {
-        status.Printf("@(dim:Local gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(localTailHash))
-        status.Printf("@(dim:Remote gut repo base commit: [)@(commit:%s)@(dim:])\n", TrimCommit(remoteTailHash))
-        if localTailHash != "" && remoteTailHash == "" {
-            tailHash = localTailHash
-            err = AssertSyncFolderIsEmpty(remote)
+    repoName := RandSeq(12)
+    GutDaemon(local, repoName, gutdPort)
+
+    // Find tailHash, if any. Bail if there are conflicting tailHashes.
+    tailHash := ""
+    var tailHashFoundOn *SyncContext
+    localTailHash, err := local.GetTailHash()
+    if err != nil { status.Bail(err) }
+    if localTailHash != "" {
+        tailHash = localTailHash
+        tailHashFoundOn = local
+    }
+    setupGutOrigin := func(ctx *SyncContext) {
+        _err := GutSetupOrigin(ctx, repoName, gutdPort)
+        if _err != nil { status.Bail(_err) }
+    }
+    contextsNeedInit := []*SyncContext{}
+    for _, ctx := range remotes {
+        myTailHash, err := ctx.GetTailHash()
+        if err != nil { status.Bail(err) }
+        if myTailHash == "" {
+            err = AssertSyncFolderIsEmpty(ctx)
             if err != nil { status.Bail(err) }
-            status.Printf("@(dim)Initializing remote repo from local repo...\n")
-            err = crossInit(local, remote)
-            if err != nil { status.Bail(err) }
-        } else if remoteTailHash != "" && localTailHash == "" {
-            tailHash = remoteTailHash
-            err = AssertSyncFolderIsEmpty(local)
-            if err != nil { status.Bail(err) }
-            status.Printf("@(dim)Initializing local repo from remote repo...\n")
-            err = crossInit(remote, local)
-            if err != nil { status.Bail(err) }
-        } else if localTailHash == "" && remoteTailHash == "" {
-            err = AssertSyncFolderIsEmpty(local)
-            if err != nil { status.Bail(err) }
-            err = AssertSyncFolderIsEmpty(remote)
-            if err != nil { status.Bail(err) }
-            status.Printf("@(dim)Initializing both local and remote gut repos...\n")
-            status.Printf("@(dim)Initializing local repo first...\n")
+            contextsNeedInit = append(contextsNeedInit, ctx)
+        } else {
+            if tailHash == "" {
+                tailHash = myTailHash
+                tailHashFoundOn = ctx
+            } else {
+                if tailHash != myTailHash {
+                    status.Printf("@(error:Found different gut repo base commits:)\n")
+                    status.Printf("@(error:[)@(commit:%s)@(error:]) on %s\n",
+                                  TrimCommit(tailHash), tailHashFoundOn.SyncPathAnsi())
+                    status.Printf("@(error:[)@(commit:%s)@(error:]) on %s\n",
+                                  TrimCommit(myTailHash), ctx.SyncPathAnsi())
+                    Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
+                }
+                setupGutOrigin(ctx)
+            }
+        }
+    }
+    if localTailHash == "" {
+        if tailHash == "" {
+            status.Printf("@(dim:No existing gut repo found. Initializing gut repo in %s.)\n", local.SyncPathAnsi())
             err = GutInit(local)
             if err != nil { status.Bail(err) }
+            setupGutOrigin(local)
             err = GutEnsureInitialCommit(local)
             if err != nil { status.Bail(err) }
-            tailHash, err = GetTailHash(local)
+            tailHash, err = local.GetTailHash()
             if err != nil { status.Bail(err) }
             if tailHash == "" {
-                return errors.New(fmt.Sprintf("Failed to initialize new gut repo in %s", local.SyncPathAnsi()))
+                Shutdown(status.Colorify("Failed to initialize new gut repo."))
             }
-            status.Printf("@(dim)Initializing remote repo from local repo...\n")
-            err = crossInit(local, remote)
-            if err != nil { status.Bail(err) }
+            tailHashFoundOn = local
         } else {
-            Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
+            err = GutInit(local)
+            if err != nil { status.Bail(err) }
+            setupGutOrigin(local)
+            err = GutPush(tailHashFoundOn)
+            if err != nil { status.Bail(err) }
+            err = GutCheckout(local, tailHashFoundOn.BranchName())
+            if err != nil { status.Bail(err) }
         }
     } else {
-        // This is the happy path where the local and remote repos are already initialized and are compatible.
-        tailHash = localTailHash
-        err = startGutDaemon(local)
+        setupGutOrigin(local)
+    }
+    for _, ctx := range contextsNeedInit {
+        err = GutInit(ctx)
         if err != nil { status.Bail(err) }
-        err = startGutDaemon(remote)
+        setupGutOrigin(ctx)
+        err = GutFetch(ctx)
         if err != nil { status.Bail(err) }
-        // XXX The gut daemons are not necessarily listening yet, so this could result in races with commit_and_update calls below
+        err = GutMerge(ctx, "origin/master")
+        if err != nil { status.Bail(err) }
     }
 
-    err = setupGutOrigin(local)
-    if err != nil { status.Bail(err) }
-    err = setupGutOrigin(remote)
-    if err != nil { status.Bail(err) }
-
     commitAndUpdate := func(src *SyncContext, changedPaths []string, updateUntracked bool) (err error) {
-        var dest *SyncContext
-        if src == local {
-            dest = remote
-        } else {
-            dest = local
-        }
         prefix := CommonPathPrefix(changedPaths...)
         if prefix != "" {
             // git is annoying if you try to git-add git-ignored files (printing a message that is very helpful when there is a human
@@ -212,7 +226,40 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
         changed, err := GutCommit(src, prefix, updateUntracked)
         if err != nil { status.Bail(err) }
         if changed {
-            return GutPull(dest)
+            if src != local {
+                err = GutPush(src)
+                if err != nil { status.Bail(err) }
+                err = GutMerge(local, src.BranchName())
+                if err != nil { status.Bail(err) }
+            }
+            done := make(chan error)
+            for _, _ctx := range remotes {
+                if _ctx != src {
+                    go func(ctx *SyncContext) {
+                        err = GutFetch(ctx)
+                        if err != nil {
+                            done<-err
+                            return
+                        }
+                        err = GutMerge(ctx, "origin/master")
+                        if err == NeedsCommitError {
+                            status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
+                            // Queue up an event to force checking for changes. Saying that
+                            // .gutignore changed is a kludgy way to get it to check for files
+                            // that should be untracked.
+                            eventChan<-FileEvent{ctx, ".gutignore"}
+                            err = nil
+                        }
+                        done<-err
+                    }(_ctx)
+                }
+            }
+            for _, ctx := range remotes {
+                if ctx != src {
+                    err = <-done
+                    if err != nil { status.Bail(err) }
+                }
+            }
         }
         return nil
     }
@@ -228,15 +275,14 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
         }
     }
 
-    WatchForChanges(local, fileEventCallbackGen(local))
-    WatchForChanges(remote, fileEventCallbackGen(remote))
+    for _, ctx := range allContexts {
+        WatchForChanges(ctx, fileEventCallbackGen(ctx))
+    }
     // The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
     // commit_and_update calls below and the time that the filesystem watches are attached.
-
-    commitAndUpdate(remote, []string{}, true)
-    commitAndUpdate(local, []string{}, true)
-    GutPull(remote)
-    GutPull(local)
+    for _, ctx := range allContexts {
+        commitAndUpdate(ctx, []string{}, true)
+    }
 
     var haveChanges bool
     var changedPaths map[*SyncContext]map[string]bool
@@ -282,7 +328,7 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
             }
         }
         if skip { continue }
-        // status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
+        status.Printf("@(dim:[)%s@(dim:] changed on) %s\n", event.filepath, event.ctx.NameAnsi())
         haveChanges = true
         ctxChanged, ok := changedPaths[event.ctx]
         if !ok {
@@ -291,7 +337,6 @@ func Sync(local *SyncContext, remote *SyncContext) (err error) {
         }
         ctxChanged[event.filepath] = true
     }
-    status.Printf("Exiting Sync because it's not finished.\n")
     return nil
 }
 
@@ -329,7 +374,6 @@ func main() {
     log.AddAnsiColorCode("error", 31)
     log.AddAnsiColorCode("commit", 32)
     status := log.New(os.Stderr, "", 0)
-    status.Printf("Process ID: %d\n", os.Getpid())
     var args []string = os.Args[1:]
     if len(args) == 0 {
         status.Fatalln("You must specify a gut-command, e.g. `gut sync ...`")
@@ -348,6 +392,7 @@ func main() {
         status.Print("gut-sync version XXXXX")
         os.Exit(0)
     }
+    bismuth.SetVerbose(OptsCommon.Verbose)
 
     signalChan := make(chan os.Signal, 1)
     signal.Notify(signalChan, os.Interrupt)
@@ -366,7 +411,7 @@ func main() {
             status.Printf("@(dim:gut) " + GitVersion + " @(dim:has already been built.)\n")
         }
     } else if cmd == "sync" {
-        var _, err = flags.ParseArgs(&OptsSync, argsRemaining)
+        var remoteArgs, err = flags.ParseArgs(&OptsSync, argsRemaining)
         if err != nil { status.Fatal(err) }
 
         local := NewSyncContext()
@@ -376,14 +421,18 @@ func main() {
         if err != nil { status.Fatal(err) }
         local.KillAllViaPidfiles()
 
-        remote := NewSyncContext()
-        err = remote.ParseSyncPath(OptsSync.Positional.RemotePath)
-        if err != nil { status.Fatal(err) }
-        err = remote.Connect()
-        if err != nil { status.Fatal(err) }
-        remote.KillAllViaPidfiles()
+        remotes := []*SyncContext{}
+        for _, remotePath := range remoteArgs {
+            remote := NewSyncContext()
+            err = remote.ParseSyncPath(remotePath)
+            if err != nil { status.Fatal(err) }
+            err = remote.Connect()
+            if err != nil { status.Fatal(err) }
+            remote.KillAllViaPidfiles()
+            remotes = append(remotes, remote)
+        }
 
-        err = Sync(local, remote)
+        err = Sync(local, remotes)
         if err != nil { status.Fatal(err) }
     }
 }
