@@ -162,9 +162,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
             } else {
                 if tailHash != myTailHash {
                     status.Printf("@(error:Found different gut repo base commits:)\n")
-                    status.Printf("@(error:[)@(commit:%s)@(error:]) on %s\n",
+                    status.Printf("@(commit:%s) @(error:on) %s\n",
                                   TrimCommit(tailHash), tailHashFoundOn.SyncPathAnsi())
-                    status.Printf("@(error:[)@(commit:%s)@(error:]) on %s\n",
+                    status.Printf("@(commit:%s) @(error:on) %s\n",
                                   TrimCommit(myTailHash), ctx.SyncPathAnsi())
                     Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
                 }
@@ -340,7 +340,7 @@ func Shutdown(reason string) {
     if reason != "" {
         status.Printf("%s ", reason)
     }
-    status.Printf("Stopping all subprocesses...")
+    status.Printf("Stopping all subprocesses...\n")
     done := make(chan bool)
     for _, _ctx := range AllSyncContexts {
         go func(ctx *SyncContext) {
@@ -356,7 +356,7 @@ func Shutdown(reason string) {
     for _, _ = range AllSyncContexts {
         <-done
     }
-    status.Printf(" Exiting.")
+    status.Printf("Exiting.")
     fmt.Println()
     os.Exit(1)
 }
