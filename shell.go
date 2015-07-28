@@ -430,12 +430,12 @@ func main() {
 		status.Fatalln("You must specify a gut-command, e.g. `gut sync ...`")
 	}
 	var cmd = args[0]
-	args = args[1:]
 	if IsGitCommand(cmd) {
 		var gutExe = PathInUserHome(GutExePath)
 		syscall.Exec(gutExe, append([]string{gutExe}, args...), os.Environ())
 		status.Fatalf("Failed to exec %s", gutExe)
 	}
+	args = args[1:]
 	var argsRemaining, err = flags.ParseArgs(&OptsCommon, args)
 	if err != nil {
 		status.Fatal(err)
