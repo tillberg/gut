@@ -71,7 +71,7 @@ func (ctx *SyncContext) BranchName() string {
 
 func (ctx *SyncContext) PathAnsi(p string) string {
 	if !ctx.IsLocal() {
-		return fmt.Sprintf(ctx.Logger().Colorify("%s@(dim::)@(path:%s)"), ctx.NameAnsi(), p)
+		return fmt.Sprintf(ctx.Logger().Colorify("@(host:%s)@(dim:@)%s@(dim::)@(path:%s)"), ctx.Username(), ctx.NameAnsi(), p)
 	}
 	return fmt.Sprintf(ctx.Logger().Colorify("@(path:%s)"), p)
 }
