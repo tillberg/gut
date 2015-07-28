@@ -123,7 +123,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	// status.Printf("Using ports %v\n", ports)
 	gutdPort := ports[0]
 	gutdAddr := fmt.Sprintf("localhost:%d", gutdPort)
-	repoName := RandSeq(12)
+	repoName := RandSeq(8)
 
 	// Start up gut-daemon on the local host, and create a reverse tunnel from each of the remote hosts
 	// back to the local gut-daemon. All hosts can connect to gut-daemon at localhost:<gutdPort>, which
