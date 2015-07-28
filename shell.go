@@ -344,7 +344,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	flushChanges := func() {
 		for ctx, pathMap := range changedPaths {
 			paths := []string{}
-			for path, _ := range pathMap {
+			for path := range pathMap {
 				paths = append(paths, path)
 			}
 			_, changedThisIgnore := changedIgnore[ctx]
@@ -411,7 +411,7 @@ func Shutdown(reason string) {
 			done <- true
 		}(_ctx)
 	}
-	for _, _ = range AllSyncContexts {
+	for range AllSyncContexts {
 		<-done
 	}
 	status.Printf("Exiting.")
