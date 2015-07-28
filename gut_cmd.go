@@ -75,10 +75,10 @@ func (ctx *SyncContext) GutInit() (err error) {
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return ctx.GutQuote("init", "init")
+	if exists {
+		return errors.New("Gut repository already exists in " + ctx.AbsSyncPath())
 	}
-	return nil
+	return ctx.GutQuote("init", "init")
 }
 
 func (ctx *SyncContext) GutSetupOrigin(repoName string, connectPort int) (err error) {
@@ -223,9 +223,16 @@ func (ctx *SyncContext) GutEnsureInitialCommit() (err error) {
 		return err
 	}
 	if head == "HEAD" {
-		err = ctx.WriteFile(path.Join(ctx.AbsSyncPath(), ".gutignore"), []byte(DefaultGutignore))
+		gutignorePath := path.Join(ctx.AbsSyncPath(), ".gutignore")
+		exists, err := ctx.PathExists(gutignorePath)
 		if err != nil {
 			return err
+		}
+		if !exists {
+			err = ctx.WriteFile(gutignorePath, []byte(DefaultGutignore))
+			if err != nil {
+				return err
+			}
 		}
 		err = ctx.GutQuote("add", "add", ".gutignore")
 		if err != nil {
