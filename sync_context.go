@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tillberg/bismuth"
+	"os/user"
 	"path"
 	"regexp"
 	"strconv"
@@ -37,6 +38,11 @@ func (ctx *SyncContext) ParseSyncPath(path string) error {
 	if isRemote {
 		if len(parts[3]) > 0 {
 			ctx.SetUsername(parts[3])
+		} else {
+			currUser, err := user.Current()
+			if err == nil {
+				ctx.SetUsername(currUser.Username)
+			}
 		}
 		ctx.SetHostname(parts[4])
 	}
