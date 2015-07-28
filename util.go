@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/tillberg/bismuth"
 	"math/rand"
 	"path/filepath"
 	"strings"
@@ -222,11 +223,11 @@ func (ctx *SyncContext) AssertSyncFolderIsEmpty() (err error) {
 		ctx.Logger().Fatalf("@(error:Move or delete it manually first, the try running gut-sync again.)\n")
 	}
 	fileInfo, err := ctx.Stat(p)
+	if err == bismuth.NotFoundError {
+		return nil
+	}
 	if err != nil {
 		bail()
-	}
-	if fileInfo == nil {
-		return nil
 	}
 	if !fileInfo.IsDir() {
 		bail()

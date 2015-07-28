@@ -5,7 +5,6 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
-	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -66,24 +65,10 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 		}
 	} else {
 		buildPath = GutSrcTmpPath
-		status.Printf("@(dim:Uploading) %s @(dim:to) %s@(dim:...)", local.PathAnsi(GutSrcPath), ctx.PathAnsi(buildPath))
-		chanErr := make(chan error)
-		stdinChan := make(chan io.WriteCloser)
-		go func() {
-			ctx.Mkdirp(buildPath)
-			err := ctx.QuotePipeIn("untar", stdinChan, ctx.AbsPath(buildPath), "tar", "xf", "-")
-			chanErr <- err
-		}()
-		ctxStdin := <-stdinChan
-		err = local.QuotePipeOut("tar", ctxStdin, local.AbsPath(GutSrcPath), "tar", "cf", "-", "--exclude=.git", "--exclude=t", "./")
-		if err != nil {
-			return false, err
-		}
-		err = <-chanErr
-		if err != nil {
-			return false, err
-		}
-		status.Printf("@(dim: done.)\n")
+		status := ctx.NewLogger("")
+		status.Printf("@(dim:Uploading) %s:@(path:%s) @(dim:to) %s:@(path:%s)@(dim:...)", local.NameAnsi(), GutSrcPath, ctx.NameAnsi(), buildPath)
+		local.UploadRecursiveExcludes(GutSrcPath, ctx.ExecContext, buildPath, []string{".git", "t"})
+		status.Printf(" @(dim: done.)\n")
 	}
 	err = ctx.GutBuild(buildPath)
 	if err != nil {
@@ -94,7 +79,7 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 	if err != nil {
 		return false, err
 	}
-	status.Printf("@(dim: done.)\n")
+	status.Printf(" @(dim: done.)\n")
 	return true, nil
 }
 

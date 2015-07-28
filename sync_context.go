@@ -74,14 +74,6 @@ func (ctx *SyncContext) SyncPathAnsi() string {
 	return ctx.PathAnsi(ctx.syncPath)
 }
 
-func (ctx *SyncContext) Mkdirp(p string) (err error) {
-	if ctx.IsWindows() {
-		return errors.New("Not implemented")
-	}
-	_, err = ctx.Output("mkdir", "-p", ctx.AbsPath(p))
-	return err
-}
-
 func (ctx *SyncContext) GutExe() string {
 	return ctx.AbsPath(GutExePath)
 }

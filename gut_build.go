@@ -144,7 +144,7 @@ func GitCloneUpdate(local *SyncContext, localPath string, repoUrl string, versio
 	_, _, retCode, err := local.RunCwd(localPath, "git", "rev-parse", version)
 	if retCode != 0 {
 		status.Printf("@(dim:Fetching latest from) %s @(dim:in order to upgrade to) %s @(dim:...)", repoUrl, version)
-		err = local.Quote("git-fetch", "git", "fetch")
+		err = local.QuoteCwd("git-fetch", localPath, "git", "fetch")
 		if err != nil {
 			return err
 		}
