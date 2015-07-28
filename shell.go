@@ -127,21 +127,23 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		if err != nil { status.Bail(err) }
 	}
 
-	ports, err := FindOpenPorts(2, allContexts...)
+	ports, err := FindOpenPorts(1, allContexts...)
 	if err != nil { status.Bail(err) }
 	// status.Printf("Using ports %v\n", ports)
 	gutdPort := ports[0]
-	autosshMonitorPort := ports[1]
+	gutdAddr := fmt.Sprintf("localhost:%d", gutdPort)
+	repoName := RandSeq(12)
 
-	for _, ctx := range allContexts {
+	// Start up gut-daemon on the local host, and create a reverse tunnel from each of the remote hosts
+	// back to the local gut-daemon. All hosts can connect to gut-daemon at localhost:<gutdPort>, which
+	// makes configuration a little simpler.
+	local.GutDaemon(repoName, gutdPort)
+	for _, ctx := range remotes {
 		if !ctx.IsLocal() {
-			err = local.StartSshTunnel(ctx, gutdPort, autosshMonitorPort)
+			err = ctx.ReverseTunnel(gutdAddr, gutdAddr)
 			if err != nil { status.Bail(err) }
 		}
 	}
-
-	repoName := RandSeq(12)
-	local.GutDaemon(repoName, gutdPort)
 
 	// Find tailHash, if any. Bail if there are conflicting tailHashes.
 	tailHash := ""
@@ -200,7 +202,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			if err != nil { status.Bail(err) }
 			err = tailHashFoundOn.GutPush()
 			if err != nil { status.Bail(err) }
-			err = local.GutCheckout(tailHashFoundOn.BranchName())
+			err = local.GutCheckoutAsMaster(tailHashFoundOn.BranchName())
 			if err != nil { status.Bail(err) }
 		}
 	} else {

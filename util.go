@@ -92,24 +92,6 @@ func RandSeq(n int) string {
 	return string(b)
 }
 
-func (ctx *SyncContext) StartSshTunnel(remote *SyncContext, gutdPort int, autosshMonitorPort int) (err error) {
-	cmd := ctx.GetCmd("autossh", "ssh")
-	if cmd == "" {
-		ctx.MissingDependency("ssh")
-	}
-	sshTunnelOpts := fmt.Sprintf("%d:localhost:%d", gutdPort, gutdPort)
-	args := []string{cmd}
-	if cmd == "autossh" && ctx.IsDarwin() {
-		args = append(args, "-M", fmt.Sprintf("%d", autosshMonitorPort))
-	}
-	args = append(args, "-N", "-R", sshTunnelOpts, remote.SshAddress())
-	pid, _, err := ctx.QuoteDaemonCwd(cmd, "", args...)
-	if err != nil {
-		return err
-	}
-	return ctx.SaveDaemonPid(cmd, pid)
-}
-
 var inotifyChangeEvents = []string{"modify", "attrib", "move", "create", "delete"}
 
 func inotifyArgs(ctx *SyncContext, monitor bool) []string {

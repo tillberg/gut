@@ -137,10 +137,10 @@ func (ctx *SyncContext) GutMerge(branch string) (err error) {
 	return nil
 }
 
-func (ctx *SyncContext) GutCheckout(branch string) (err error) {
+func (ctx *SyncContext) GutCheckoutAsMaster(branch string) (err error) {
 	status := ctx.NewLogger("checkout")
 	status.Printf("@(dim:Checking out) %s @(dim:on) %s@(dim:...)\n", branch, ctx.NameAnsi())
-	return ctx.GutQuote("checkout", "checkout", branch)
+	return ctx.GutQuote("checkout", "checkout", "-b", "master", branch)
 }
 
 func (ctx *SyncContext) GutPush() (err error) {
