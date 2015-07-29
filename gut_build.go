@@ -108,11 +108,11 @@ func GitHardResetAndClean(local *SyncContext, localPath string, repoUrl string, 
 	if !strings.Contains(gitRemoteOut, repoUrl) {
 		return errors.New("I think I might be trying to git-reset the wrong repo.")
 	}
-	err = local.QuoteCwd("git-reset", localPath, "git", "reset", "--quiet", "--hard", version)
+	_, err = local.QuoteCwd("git-reset", localPath, "git", "reset", "--quiet", "--hard", version)
 	if err != nil {
 		return err
 	}
-	err = local.QuoteCwd("git-clean", localPath, "git", "clean", "-fdxq")
+	_, err = local.QuoteCwd("git-clean", localPath, "git", "clean", "-fdxq")
 	return err
 }
 
@@ -144,7 +144,7 @@ func GitCloneUpdate(local *SyncContext, localPath string, repoUrl string, versio
 	_, _, retCode, err := local.RunCwd(localPath, "git", "rev-parse", version)
 	if retCode != 0 {
 		status.Printf("@(dim:Fetching latest from) %s @(dim:in order to upgrade to) %s @(dim:...)", repoUrl, version)
-		err = local.QuoteCwd("git-fetch", localPath, "git", "fetch")
+		_, err = local.QuoteCwd("git-fetch", localPath, "git", "fetch")
 		if err != nil {
 			return err
 		}
@@ -191,39 +191,38 @@ func (ctx *SyncContext) GutBuild(buildPath string) (err error) {
 	}
 	status := ctx.NewLogger("build")
 	defer status.Close()
-	doMake := func(name string, args ...string) (_err error) {
+	doMake := func(name string, args ...string) (retCode int, err error) {
 		if ctx.IsWindows() {
 			makePath := ctx.AbsPath(path.Join(MsysgitPath, "bin/make.exe"))
 			cdCmd := shellquote.Join("cd", buildPath)
 			makeCmd := "PATH=/bin:/mingw/bin NO_GETTEXT=1 " + shellquote.Join(append([]string{makePath}, args...)...)
-			_err = ctx.QuoteShell("make-"+name, cdCmd+" && "+makeCmd)
+			return ctx.QuoteShell("make-"+name, cdCmd+" && "+makeCmd)
 		} else {
-			_err = ctx.QuoteCwd("make-"+name, buildPath, append([]string{"make"}, args...)...)
+			return ctx.QuoteCwd("make-"+name, buildPath, append([]string{"make"}, args...)...)
 		}
-		return _err
 	}
 	if !ctx.IsWindows() {
 		status.Printf("@(dim:Configuring Makefile for gut...)\n")
-		err = doMake("configure", installPrefix, "configure")
-		if err != nil {
-			return err
+		retCode, err := doMake("configure", installPrefix, "configure")
+		if err != nil || retCode != 0 {
+			Shutdown(status.Colorify("@(error:`make configure` failed during gut build.)"))
 		}
-		err = ctx.QuoteCwd("autoconf", buildPath, ctx.AbsPath(path.Join(buildPath, "configure")), installPrefix)
-		if err != nil {
-			return err
+		retCode, err = ctx.QuoteCwd("autoconf", buildPath, ctx.AbsPath(path.Join(buildPath, "configure")), installPrefix)
+		if err != nil || retCode != 0 {
+			Shutdown(status.Colorify("@(error:`configure` failed during gut build.)"))
 		}
 	}
 	parallelism := ctx.GetNumCores()
 	status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)\n", parallelism)
-	err = doMake("build", installPrefix, "-j", parallelism)
-	if err != nil {
-		return err
+	retCode, err := doMake("build", installPrefix, "-j", parallelism)
+	if err != nil || retCode != 0 {
+		Shutdown(status.Colorify("@(error:`make` failed during gut build.)"))
 	}
 	status.Printf("@(dim:Finished building gut.)\n")
 	status.Printf("@(dim:Installing gut to) @(path:%s)@(dim:...)\n", gutDistPath)
-	err = doMake("install", installPrefix, "install")
-	if err != nil {
-		return err
+	retCode, err = doMake("install", installPrefix, "install")
+	if err != nil || retCode != 0 {
+		Shutdown(status.Colorify("@(error:`make install` failed during gut build.)"))
 	}
 	status.Printf("@(dim:Finished installing gut to) @(path:%s)@(dim:.)\n", gutDistPath)
 	return nil

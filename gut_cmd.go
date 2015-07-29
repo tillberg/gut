@@ -78,7 +78,8 @@ func (ctx *SyncContext) GutInit() (err error) {
 	if exists {
 		return errors.New("Gut repository already exists in " + ctx.AbsSyncPath())
 	}
-	return ctx.GutQuote("init", "init")
+	_, err = ctx.GutQuote("init", "init")
+	return err
 }
 
 func (ctx *SyncContext) GutSetupOrigin(repoName string, connectPort int) (err error) {
@@ -140,13 +141,15 @@ func (ctx *SyncContext) GutMerge(branch string) (err error) {
 func (ctx *SyncContext) GutCheckoutAsMaster(branch string) (err error) {
 	status := ctx.NewLogger("checkout")
 	status.Printf("@(dim:Checking out) %s @(dim:on) %s@(dim:...)\n", branch, ctx.NameAnsi())
-	return ctx.GutQuote("checkout", "checkout", "-b", "master", branch)
+	_, err = ctx.GutQuote("checkout", "checkout", "-b", "master", branch)
+	return err
 }
 
 func (ctx *SyncContext) GutPush() (err error) {
 	status := ctx.NewLogger("push")
 	status.Printf("@(dim:Pushing changes from) %s@(dim:...)\n", ctx.NameAnsi())
-	return ctx.GutQuote("push", "push", "origin", "master:"+ctx.BranchName(), "--progress")
+	_, err = ctx.GutQuote("push", "push", "origin", "master:"+ctx.BranchName(), "--progress")
+	return err
 }
 
 var needsCommitStr = "Your local changes to the following files would be overwritten"
@@ -185,7 +188,7 @@ func (ctx *SyncContext) GutCommit(prefix string, updateUntracked bool) (changed 
 			for _, filename := range strings.Split(lsFiles, "\n") {
 				status.Printf("@(dim:Untracking newly-.gutignored) %s\n", filename)
 				rmArgs := []string{"rm", "--cached", "--ignore-unmatch", "--quiet", "--", filename}
-				err = ctx.GutQuote("rm--cached", rmArgs...)
+				_, err = ctx.GutQuote("rm--cached", rmArgs...)
 				if err != nil {
 					return false, err
 				}
@@ -193,11 +196,11 @@ func (ctx *SyncContext) GutCommit(prefix string, updateUntracked bool) (changed 
 		}
 	}
 	status.Printf("@(dim:Checking) %s @(dim)for changes (scope=@(r)%s@(dim))...", ctx.NameAnsi(), prefix)
-	err = ctx.GutQuote("add", "add", "--all", "--", prefix)
+	_, err = ctx.GutQuote("add", "add", "--all", "--", prefix)
 	if err != nil {
 		return false, err
 	}
-	err = ctx.GutQuote("commit", "commit", "--message", "autocommit")
+	_, err = ctx.GutQuote("commit", "commit", "--message", "autocommit")
 	if err != nil {
 		return false, err
 	}
@@ -234,11 +237,11 @@ func (ctx *SyncContext) GutEnsureInitialCommit() (err error) {
 				return err
 			}
 		}
-		err = ctx.GutQuote("add", "add", ".gutignore")
+		_, err = ctx.GutQuote("add", "add", ".gutignore")
 		if err != nil {
 			return err
 		}
-		err = ctx.GutQuote("commit", "commit", "--message", "Inital commit")
+		_, err = ctx.GutQuote("commit", "commit", "--message", "Inital commit")
 	}
 	return err
 }

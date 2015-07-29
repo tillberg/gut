@@ -277,6 +277,7 @@ func JoinWithAndAndCommas(strs ...string) string {
 	if len(strs) > 1 {
 		commaStr := log.Colorify("@(dim:, )")
 		andStr := log.Colorify("@(dim:and )")
+		strs = strs[1:]
 		for i, str := range strs {
 			if len(strs) >= 2 {
 				buf.WriteString(commaStr)

@@ -14,7 +14,8 @@ import (
 
 type SyncContext struct {
 	*bismuth.ExecContext
-	syncPath string
+	syncPath        string
+	hasGutInstalled *bool
 }
 
 var AllSyncContexts = []*SyncContext{}
@@ -84,6 +85,36 @@ func (ctx *SyncContext) GutExe() string {
 	return ctx.AbsPath(GutExePath)
 }
 
+func (ctx *SyncContext) HasGutInstalled() bool {
+	if ctx.hasGutInstalled == nil {
+		hasGutInstalled := ctx._hasGutInstalled()
+		ctx.hasGutInstalled = &hasGutInstalled
+	}
+	return *ctx.hasGutInstalled
+}
+
+func (ctx *SyncContext) _hasGutInstalled() bool {
+	status := ctx.Logger()
+	desiredGitVersion := GitVersion
+	if ctx.IsWindows() {
+		desiredGitVersion = GitWinVersion
+	}
+	exists, err := ctx.PathExists(GutExePath)
+	if err != nil {
+		status.Bail(err)
+	}
+	if exists {
+		actualGutVersion, err := ctx.Output(ctx.AbsPath(GutExePath), "--version")
+		if err != nil {
+			status.Bail(err)
+		}
+		if strings.Contains(string(actualGutVersion), strings.TrimLeft(desiredGitVersion, "v")) {
+			return true
+		}
+	}
+	return false
+}
+
 func (ctx *SyncContext) GutArgs(otherArgs ...string) []string {
 	args := []string{}
 	args = append(args, ctx.GutExe())
@@ -102,7 +133,7 @@ func (ctx *SyncContext) GutQuoteBuf(suffix string, args ...string) (stdout []byt
 	return ctx.QuoteCwdBuf(suffix, ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }
 
-func (ctx *SyncContext) GutQuote(suffix string, args ...string) error {
+func (ctx *SyncContext) GutQuote(suffix string, args ...string) (int, error) {
 	return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }
 

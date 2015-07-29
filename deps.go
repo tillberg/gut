@@ -4,25 +4,50 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/tillberg/ansi-log"
 	"os"
 	"strings"
+	"sync"
 )
+
+func (ctx *SyncContext) tryRun(args ...string) bool {
+	_, _, retCode, err := ctx.Run(args...)
+	if err != nil {
+		ctx.Logger().Bail(err)
+	}
+	return retCode == 0
+}
 
 func (ctx *SyncContext) listMissingLocalDeps() []string {
 	missing := []string{}
-	_, _, retCode, err := ctx.Run("git", "version")
-	if err != nil {
-		log.Bail(err)
-	}
-	if retCode != 0 {
-		missing = append(missing, "git")
+	if !ctx.HasGutInstalled() {
+		// This is needed to build & install gut, but then aren't needed after that.
+		if !ctx.tryRun("git", "version") {
+			missing = append(missing, "git")
+		}
 	}
 	return missing
 }
 
 func (ctx *SyncContext) listMissingRemoteDeps() []string {
 	missing := []string{}
+	if !ctx.tryRun("which", "inotifywait") {
+		if !ctx.tryRun("fswatch", "--version") {
+			if ctx.IsDarwin() {
+				missing = append(missing, "fswatch")
+			} else {
+				missing = append(missing, "inotify-tools")
+			}
+		}
+	}
+	if !ctx.HasGutInstalled() {
+		// These are needed to build & install gut, but then aren't needed after that.
+		if !ctx.tryRun("autoconf", "--version") {
+			missing = append(missing, "autoconf")
+		}
+		if ctx.IsLinux() && !ctx.tryRun("msgfmt", "--version") {
+			missing = append(missing, "gettext")
+		}
+	}
 	return missing
 }
 
@@ -37,24 +62,30 @@ func (ctx *SyncContext) CheckRemoteDeps() (err error) {
 	return ctx.MissingDependency(missing...)
 }
 
+var mutex sync.Mutex
+
 func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 	if len(names) == 0 {
 		return nil
 	}
+	// Only bombard the user with on MissingDependency dialog at a time, even though we'll do the
+	// dependency checks in parallel (for fast startup).
+	mutex.Lock()
+	defer mutex.Unlock()
 	logger := ctx.Logger()
 	depsStr := strings.Join(names, " ")
+	depsStrCommas := strings.Join(names, logger.Colorify("@(dim:,) "))
 	depsStrLong := JoinWithAndAndCommas(names...)
 	noun := "dependency"
-	quantifier := "this"
+	quantifier := "A"
 	pronoun := "it"
 	if len(names) > 1 {
 		noun = "dependencies"
-		quantifier = "these"
+		quantifier = "These"
 		pronoun = "them"
 	}
-
 	depsError := errors.New(fmt.Sprintf("Missing %s: %s", noun, depsStr))
-	logger.Printf("@(error:This system appears to be missing %s %s:) %s\n", quantifier, noun, depsStr)
+	logger.Printf("@(error:%s %s appear to be missing on) %s@(error::) %s\n", quantifier, noun, ctx.NameAnsi(), depsStrCommas)
 
 	installCmd := ""
 	if ctx.IsLinux() {
@@ -69,7 +100,7 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 	ctx.Logger().Printf("@(dim:$) %s\n", installCmd)
 	attempts := 0
 	for {
-		logger.Printf("Would you like gut-sync to attempt to install these [Y/n]? ")
+		logger.Printf("Would you like gut-sync to try to install %s [Y/n]? ", pronoun)
 		reader := bufio.NewReader(os.Stdin)
 		text, _ := reader.ReadString('\n')
 		text = strings.TrimSpace(text)
@@ -77,11 +108,11 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 		attempts++
 		if text == "" || text == "y" || text == "Y" {
 			break
-		} else if attempts >= 3 || text == "N" || text == "n" {
+		} else if attempts >= 3 || text == "N" || text == "n" || text == "q" || text == "Q" {
 			Shutdown("")
 		}
 	}
-	logger.Printf("@(dim:Attempting to install) %s@(dim:...)\n", depsStrLong)
+	logger.Printf("@(dim:Attempting to install) %s on %s@(dim:...)\n", depsStrLong, ctx.NameAnsi())
 	retCode, err := ctx.ShellInteractive(installCmd)
 	if err != nil {
 		logger.Bail(err)

@@ -32,22 +32,8 @@ var OptsSync struct {
 
 func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err error) {
 	status := ctx.Logger()
-	desiredGitVersion := GitVersion
-	if ctx.IsWindows() {
-		desiredGitVersion = GitWinVersion
-	}
-	exists, err := ctx.PathExists(GutExePath)
-	if err != nil {
-		status.Bail(err)
-	}
-	if exists {
-		actualGutVersion, err := ctx.Output(ctx.AbsPath(GutExePath), "--version")
-		if err != nil {
-			status.Bail(err)
-		}
-		if strings.Contains(string(actualGutVersion), strings.TrimLeft(desiredGitVersion, "v")) {
-			return false, nil
-		}
+	if ctx.HasGutInstalled() {
+		return false, nil
 	}
 	status.Printf("@(dim:Need to build gut on) %s@(dim:.)\n", ctx.NameAnsi())
 	err = ctx.EnsureGutFolders()
