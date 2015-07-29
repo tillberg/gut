@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
 	"math/rand"
 	"path/filepath"
@@ -265,4 +266,29 @@ func CommonPathPrefix(paths ...string) string {
 		}
 	}
 	return common
+}
+
+func JoinWithAndAndCommas(strs ...string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	buf.WriteString(strs[0])
+	if len(strs) > 1 {
+		commaStr := log.Colorify("@(dim:, )")
+		andStr := log.Colorify("@(dim:and )")
+		for i, str := range strs {
+			if len(strs) >= 2 {
+				buf.WriteString(commaStr)
+			}
+			if i == len(strs)-1 {
+				if len(strs) < 2 {
+					buf.WriteString(" ")
+				}
+				buf.WriteString(andStr)
+			}
+			buf.WriteString(str)
+		}
+	}
+	return buf.String()
 }

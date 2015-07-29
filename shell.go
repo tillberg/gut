@@ -38,12 +38,12 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 	}
 	exists, err := ctx.PathExists(GutExePath)
 	if err != nil {
-		return false, err
+		status.Bail(err)
 	}
 	if exists {
 		actualGutVersion, err := ctx.Output(ctx.AbsPath(GutExePath), "--version")
 		if err != nil {
-			return false, err
+			status.Bail(err)
 		}
 		if strings.Contains(string(actualGutVersion), strings.TrimLeft(desiredGitVersion, "v")) {
 			return false, nil
@@ -52,11 +52,11 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 	status.Printf("@(dim:Need to build gut on) %s@(dim:.)\n", ctx.NameAnsi())
 	err = ctx.EnsureGutFolders()
 	if err != nil {
-		return false, err
+		status.Bail(err)
 	}
 	err = GutBuildPrepare(local, ctx)
 	if err != nil {
-		return false, err
+		status.Bail(err)
 	}
 	var buildPath string
 	if ctx.IsLocal() {
@@ -74,12 +74,12 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 	}
 	err = ctx.GutBuild(buildPath)
 	if err != nil {
-		return false, err
+		status.Bail(err)
 	}
 	status.Printf("@(dim:Cleaning up...)")
 	err = GutUnprepare(local, ctx)
 	if err != nil {
-		return false, err
+		status.Bail(err)
 	}
 	status.Printf(" @(dim: done.)\n")
 	return true, nil
@@ -90,24 +90,13 @@ const commitDebounceDuration = 100 * time.Millisecond
 func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	status := local.NewLogger("sync")
 	defer status.Close()
-	hostsStr := local.SyncPathAnsi()
-	commaStr := status.Colorify("@(dim:, )")
-	andStr := status.Colorify("@(dim:and )")
-	for i, ctx := range remotes {
-		if len(remotes) >= 2 {
-			hostsStr += commaStr
-		}
-		if i == len(remotes)-1 {
-			if len(remotes) < 2 {
-				hostsStr += " "
-			}
-			hostsStr += andStr
-		}
-		hostsStr += ctx.SyncPathAnsi()
-	}
-	status.Printf("@(dim:Starting gut-sync between) %s@(dim:.)\n", hostsStr)
-
 	allContexts := append([]*SyncContext{local}, remotes...)
+	hostsStrs := []string{}
+	for _, ctx := range allContexts {
+		hostsStrs = append(hostsStrs, ctx.SyncPathAnsi())
+	}
+	hostsStr := JoinWithAndAndCommas(hostsStrs...)
+	status.Printf("@(dim:Starting gut-sync between) %s@(dim:.)\n", hostsStr)
 
 	for _, ctx := range allContexts {
 		_, err = EnsureBuild(local, ctx)
@@ -409,9 +398,6 @@ func Shutdown(reason string) {
 	os.Exit(1)
 }
 
-func initLog() {
-}
-
 func main() {
 	log.EnableMultilineMode()
 	log.EnableColorTemplate()
@@ -444,7 +430,7 @@ func main() {
 		}
 		usr, err := user.Current()
 		if err != nil {
-			log.Fatal(err)
+			log.Bail(err)
 		}
 		var gutExe = path.Join(usr.HomeDir, GutExePath[2:])
 		syscall.Exec(gutExe, append([]string{gutExe}, args...), os.Environ())
@@ -455,7 +441,7 @@ func main() {
 	args = args[1:]
 	var argsRemaining, err = flags.ParseArgs(&OptsCommon, args)
 	if err != nil {
-		status.Fatal(err)
+		status.Bail(err)
 	}
 	// fmt.Printf("color: %s\n", OptsCommon.NoColor)
 	if OptsCommon.Version {
@@ -475,11 +461,15 @@ func main() {
 		var local = NewSyncContext()
 		err := local.Connect()
 		if err != nil {
-			status.Fatal(err)
+			status.Bail(err)
+		}
+		err = local.CheckLocalDeps()
+		if err != nil {
+			status.Bail(err)
 		}
 		didSomething, err := EnsureBuild(local, local)
 		if err != nil {
-			status.Fatal(err)
+			status.Bail(err)
 		}
 		if !didSomething {
 			status.Printf("@(dim:gut) " + GitVersion + " @(dim:has already been built.)\n")
@@ -487,17 +477,21 @@ func main() {
 	} else if cmd == "sync" {
 		var remoteArgs, err = flags.ParseArgs(&OptsSync, argsRemaining)
 		if err != nil {
-			status.Fatal(err)
+			status.Bail(err)
 		}
 
 		local := NewSyncContext()
 		err = local.ParseSyncPath(OptsSync.Positional.LocalPath)
 		if err != nil {
-			status.Fatal(err)
+			status.Bail(err)
 		}
 		err = local.Connect()
 		if err != nil {
-			status.Fatal(err)
+			status.Bail(err)
+		}
+		err = local.CheckLocalDeps()
+		if err != nil {
+			status.Bail(err)
 		}
 		local.KillAllViaPidfiles()
 
@@ -506,19 +500,23 @@ func main() {
 			remote := NewSyncContext()
 			err = remote.ParseSyncPath(remotePath)
 			if err != nil {
-				status.Fatal(err)
+				status.Bail(err)
 			}
 			err = remote.Connect()
 			if err != nil {
-				status.Fatal(err)
+				status.Bail(err)
 			}
 			remote.KillAllViaPidfiles()
+			err = remote.CheckRemoteDeps()
+			if err != nil {
+				status.Bail(err)
+			}
 			remotes = append(remotes, remote)
 		}
 
 		err = Sync(local, remotes)
 		if err != nil {
-			status.Fatal(err)
+			status.Bail(err)
 		}
 	}
 }
