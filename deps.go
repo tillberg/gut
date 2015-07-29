@@ -62,6 +62,12 @@ func (ctx *SyncContext) CheckRemoteDeps() (err error) {
 	return ctx.MissingDependency(missing...)
 }
 
+// FWIW, here's the snippet used in python-gut to install inotify-win:
+// gut_build.git_clone_update(config.INOTIFY_WIN_REPO_URL, config.INOTIFY_WIN_PATH, config.INOTIFY_WIN_VERSION)
+// status.out('(@dim)Building (@r)inotify-win(@dim)...')
+// with context.cwd(context.path(config.INOTIFY_WIN_PATH)):
+//     context['cmd']['/c', '%WINDIR%\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe /t:exe /out:inotifywait.exe src\\*.cs']()
+
 var mutex sync.Mutex
 
 func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
