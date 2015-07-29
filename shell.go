@@ -103,33 +103,56 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	// Start up gut-daemon on the local host, and create a reverse tunnel from each of the remote hosts
 	// back to the local gut-daemon. All hosts can connect to gut-daemon at localhost:<gutdPort>, which
 	// makes configuration a little simpler.
-	local.GutDaemon(repoName, gutdPort)
-	for _, ctx := range remotes {
-		if !ctx.IsLocal() {
-			err = ctx.ReverseTunnel(gutdAddr, gutdAddr)
-			if err != nil {
-				status.Bail(err)
-			}
+	ready := make(chan bool)
+	numTasks := 0
+	goTask := func(taskCtx *SyncContext, fn func(*SyncContext)) {
+		numTasks++
+		go func() {
+			fn(taskCtx)
+			ready <- true
+		}()
+	}
+	joinTasks := func() {
+		for numTasks > 0 {
+			<-ready
+			numTasks--
 		}
 	}
+	goTask(local, func(taskCtx *SyncContext) {
+		err := taskCtx.GutDaemon(repoName, gutdPort)
+		if err != nil {
+			status.Bail(err)
+		}
+	})
+	for _, ctx := range remotes {
+		if !ctx.IsLocal() {
+			goTask(ctx, func(taskCtx *SyncContext) {
+				err = taskCtx.ReverseTunnel(gutdAddr, gutdAddr)
+				if err != nil {
+					status.Bail(err)
+				}
+			})
+		}
+	}
+	joinTasks()
+	for _, ctx := range allContexts {
+		goTask(ctx, func(taskCtx *SyncContext) {
+			taskCtx.UpdateTailHash()
+		})
+	}
+	joinTasks()
 
 	// Find tailHash, if any. Bail if there are conflicting tailHashes.
 	tailHash := ""
 	var tailHashFoundOn *SyncContext
-	localTailHash, err := local.GetTailHash()
-	if err != nil {
-		status.Bail(err)
-	}
+	localTailHash := local.GetTailHash()
 	if localTailHash != "" {
 		tailHash = localTailHash
 		tailHashFoundOn = local
 	}
 	contextsNeedInit := []*SyncContext{}
 	for _, ctx := range remotes {
-		myTailHash, err := ctx.GetTailHash()
-		if err != nil {
-			status.Bail(err)
-		}
+		myTailHash := ctx.GetTailHash()
 		if myTailHash == "" {
 			err = ctx.AssertSyncFolderIsEmpty()
 			if err != nil {
@@ -149,10 +172,12 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 						TrimCommit(myTailHash), ctx.SyncPathAnsi())
 					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
 				}
-				err = ctx.GutSetupOrigin(repoName, gutdPort)
-				if err != nil {
-					status.Bail(err)
-				}
+				goTask(ctx, func(taskCtx *SyncContext) {
+					err := ctx.GutSetupOrigin(repoName, gutdPort)
+					if err != nil {
+						status.Bail(err)
+					}
+				})
 			}
 		}
 	}
@@ -171,10 +196,8 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			if err != nil {
 				status.Bail(err)
 			}
-			tailHash, err = local.GetTailHash()
-			if err != nil {
-				status.Bail(err)
-			}
+			local.UpdateTailHash()
+			tailHash = local.GetTailHash()
 			if tailHash == "" {
 				Shutdown(status.Colorify("Failed to initialize new gut repo."))
 			}
@@ -188,6 +211,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			if err != nil {
 				status.Bail(err)
 			}
+			joinTasks() // Wait for GutSetupOrigin on tailHashFoundOn to finish
 			err = tailHashFoundOn.GutPush()
 			if err != nil {
 				status.Bail(err)
@@ -198,25 +222,30 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			}
 		}
 	} else {
-		err = local.GutSetupOrigin(repoName, gutdPort)
-		if err != nil {
-			status.Bail(err)
-		}
+		goTask(local, func(taskCtx *SyncContext) {
+			err := local.GutSetupOrigin(repoName, gutdPort)
+			if err != nil {
+				status.Bail(err)
+			}
+		})
 	}
 	for _, ctx := range contextsNeedInit {
-		err = ctx.GutInit()
-		if err != nil {
-			status.Bail(err)
-		}
-		err = ctx.GutSetupOrigin(repoName, gutdPort)
-		if err != nil {
-			status.Bail(err)
-		}
-		err = ctx.GutPull()
-		if err != nil {
-			status.Bail(err)
-		}
+		goTask(ctx, func(taskCtx *SyncContext) {
+			err := ctx.GutInit()
+			if err != nil {
+				status.Bail(err)
+			}
+			err = ctx.GutSetupOrigin(repoName, gutdPort)
+			if err != nil {
+				status.Bail(err)
+			}
+			err = ctx.GutPull()
+			if err != nil {
+				status.Bail(err)
+			}
+		})
 	}
+	joinTasks()
 
 	type FileEvent struct {
 		ctx      *SyncContext
@@ -224,7 +253,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	eventChan := make(chan FileEvent)
 
-	commitAndUpdate := func(src *SyncContext, changedPaths []string, updateUntracked bool) (err error) {
+	commitScoped := func(src *SyncContext, changedPaths []string, updateUntracked bool) (changed bool, err error) {
 		prefix := CommonPathPrefix(changedPaths...)
 		if prefix != "" {
 			// git is annoying if you try to git-add git-ignored files (printing a message that is very helpful when there is a human
@@ -239,47 +268,11 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		if prefix == "" {
 			prefix = "."
 		}
-		changed, err := src.GutCommit(prefix, updateUntracked)
+		changed, err = src.GutCommit(prefix, updateUntracked)
 		if err != nil {
 			status.Bail(err)
 		}
-		if changed {
-			if src != local {
-				err = src.GutPush()
-				if err != nil {
-					status.Bail(err)
-				}
-				err = local.GutMerge(src.BranchName())
-				if err != nil {
-					status.Bail(err)
-				}
-			}
-			done := make(chan error)
-			for _, _ctx := range remotes {
-				if _ctx != src {
-					go func(ctx *SyncContext) {
-						done <- ctx.GutPull()
-					}(_ctx)
-				}
-			}
-			for _, ctx := range remotes {
-				if ctx != src {
-					err = <-done
-					if err == NeedsCommitError {
-						status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
-						// Queue up an event to force checking for changes. Saying that
-						// .gutignore changed is a kludgy way to get it to check for files
-						// that should be untracked.
-						eventChan <- FileEvent{ctx, ".gutignore"}
-						err = nil
-					}
-					if err != nil {
-						status.Bail(err)
-					}
-				}
-			}
-		}
-		return nil
+		return changed, nil
 	}
 
 	fileEventCallbackGen := func(ctx *SyncContext) func(filepath string) {
@@ -289,13 +282,11 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 
 	for _, ctx := range allContexts {
-		ctx.WatchForChanges(fileEventCallbackGen(ctx))
+		goTask(ctx, func(taskCtx *SyncContext) {
+			taskCtx.WatchForChanges(fileEventCallbackGen(taskCtx))
+		})
 	}
-	// The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between the
-	// commit_and_update calls below and the time that the filesystem watches are attached.
-	for _, ctx := range allContexts {
-		commitAndUpdate(ctx, []string{}, true)
-	}
+	joinTasks()
 
 	var haveChanges bool
 	var changedPaths map[*SyncContext]map[string]bool
@@ -307,16 +298,87 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	clearChanges()
 	flushChanges := func() {
+		changedCtxChan := make(chan *SyncContext)
 		for ctx, pathMap := range changedPaths {
-			paths := []string{}
-			for path := range pathMap {
-				paths = append(paths, path)
+			go func(taskCtx *SyncContext, taskPathMap map[string]bool) {
+				paths := []string{}
+				for path := range taskPathMap {
+					paths = append(paths, path)
+				}
+				_, changedThisIgnore := changedIgnore[taskCtx]
+				changed, err := commitScoped(taskCtx, paths, changedThisIgnore)
+				if err != nil {
+					status.Bail(err)
+				}
+				if changed {
+					changedCtxChan <- taskCtx
+				} else {
+					changedCtxChan <- nil
+				}
+			}(ctx, pathMap)
+		}
+		changedCtxs := []*SyncContext{}
+		for _ = range changedPaths {
+			ctx := <-changedCtxChan
+			if ctx != nil {
+				changedCtxs = append(changedCtxs, ctx)
 			}
-			_, changedThisIgnore := changedIgnore[ctx]
-			commitAndUpdate(ctx, paths, changedThisIgnore)
+		}
+		if len(changedCtxs) > 0 {
+			for _, ctx := range changedCtxs {
+				if ctx != local {
+					err = ctx.GutPush()
+					if err != nil {
+						status.Bail(err)
+					}
+					err = local.GutMerge(ctx.BranchName())
+					if err != nil {
+						status.Bail(err)
+					}
+				}
+			}
+			localMasterCommit, err := local.GutRevParseHead()
+			if err != nil {
+				status.Bail(err)
+			}
+			// Push the update out to all the remotes
+			done := make(chan error)
+			for _, ctx := range remotes {
+				go func(taskCtx *SyncContext) {
+					myCommit, err := taskCtx.GutRevParseHead()
+					if err != nil {
+						done <- err
+						return
+					}
+					if myCommit != localMasterCommit {
+						err = taskCtx.GutPull()
+					}
+					done <- err
+				}(ctx)
+			}
+			for _, ctx := range remotes {
+				err = <-done
+				if err == NeedsCommitError {
+					status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
+					eventChan <- FileEvent{ctx, "*"}
+					err = nil
+				}
+				if err != nil {
+					status.Bail(err)
+				}
+			}
 		}
 		clearChanges()
 	}
+
+	go func() {
+		// Note: The filesystem watchers are not necessarily listening to all updates yet, so we could miss file changes that occur between
+		// the commit_and_update calls below and the time that the filesystem watches are attached.
+		for _, ctx := range allContexts {
+			// Queue up an event to force checking for changes.
+			eventChan <- FileEvent{ctx, "*"}
+		}
+	}()
 
 	var event FileEvent
 	for {
@@ -336,7 +398,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		for _, part := range parts {
 			if part == ".gut" {
 				skip = true
-			} else if part == ".gutignore" {
+			} else if part == ".gutignore" || part == "*" {
 				changedIgnore[event.ctx] = true
 			}
 		}
@@ -466,38 +528,50 @@ func main() {
 			status.Bail(err)
 		}
 
+		ready := make(chan bool)
+
 		local := NewSyncContext()
 		err = local.ParseSyncPath(OptsSync.Positional.LocalPath)
 		if err != nil {
 			status.Bail(err)
 		}
-		err = local.Connect()
-		if err != nil {
-			status.Bail(err)
-		}
-		err = local.CheckLocalDeps()
-		if err != nil {
-			status.Bail(err)
-		}
-		local.KillAllViaPidfiles()
+		go func() {
+			err = local.Connect()
+			if err != nil {
+				status.Bail(err)
+			}
+			err = local.CheckLocalDeps()
+			if err != nil {
+				status.Bail(err)
+			}
+			local.KillAllViaPidfiles()
+			ready <- true
+		}()
 
 		remotes := []*SyncContext{}
 		for _, remotePath := range remoteArgs {
 			remote := NewSyncContext()
+			remotes = append(remotes, remote)
 			err = remote.ParseSyncPath(remotePath)
 			if err != nil {
 				status.Bail(err)
 			}
-			err = remote.Connect()
-			if err != nil {
-				status.Bail(err)
-			}
-			remote.KillAllViaPidfiles()
-			err = remote.CheckRemoteDeps()
-			if err != nil {
-				status.Bail(err)
-			}
-			remotes = append(remotes, remote)
+			go func(_remote *SyncContext) {
+				err = _remote.Connect()
+				if err != nil {
+					status.Bail(err)
+				}
+				_remote.KillAllViaPidfiles()
+				err = _remote.CheckRemoteDeps()
+				if err != nil {
+					status.Bail(err)
+				}
+				ready <- true
+			}(remote)
+		}
+
+		for i := 0; i < len(remotes)+1; i++ {
+			<-ready
 		}
 
 		err = Sync(local, remotes)
