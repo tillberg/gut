@@ -242,11 +242,11 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 				isFirstTime = false
 			}
 			if err != nil {
-				status.Printf("Error starting watcher: %v\n", err)
+				status.Printf("Error starting %s: %v\n", watchType, err)
 			} else {
-				status.Printf("@(dim:Watcher started.)\n")
+				ctx.Logger().Printf("@(dim:%s started, watching )%s@(dim::)@(path:%s)@(dim:.)\n", watchType, ctx.NameAnsi(), watchedRoot)
 				<-retCodeChan
-				status.Printf("@(dim:Watcher exited.)\n")
+				ctx.Logger().Printf("@(dim:%s exited.)\n", watchType)
 			}
 		}
 	}()

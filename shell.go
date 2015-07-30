@@ -6,6 +6,7 @@ import (
 	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"os/user"
@@ -40,8 +41,9 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err
 	isFirstTime := true
 	firstTimeChan := make(chan error)
 	go func() {
+		logger := ctx.Logger()
 		for {
-			_, tunnelErrChan, err := ctx.ReverseTunnel(srcAddr, destAddr)
+			listener, tunnelErrChan, err := ctx.ReverseTunnel(srcAddr, destAddr)
 			if isFirstTime {
 				firstTimeChan <- err
 				isFirstTime = false
@@ -50,22 +52,30 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err
 				err = <-tunnelErrChan
 			}
 			if err == io.EOF {
-				ctx.Logger().Printf("@(dim:Encountered EOF on reverse tunnel from) %s @(dim:to) %s\n", srcAddr, destAddr)
+				logger.Printf("@(error:Connection lost.)\n")
 			} else {
-				ctx.Logger().Printf("@(error:Encountered error on reverse tunnel from) %s @(error:to) %s@(error:: %v)\n", srcAddr, destAddr)
+				logger.Printf("@(error:Encountered error on reverse tunnel from) %s @(error:to) %s@(error:: %v)\n", srcAddr, destAddr)
 			}
+			listener.Close() // Ignore any errors; it might already be closed.
+
+			reconnectLogger := ctx.NewLogger("")
+			reconnectStart := time.Now()
 			for {
-				ctx.Close()
 				time.Sleep(time.Second)
-				ctx.Logger().Printf("@(dim:Reconnecting...)\n")
+				elapsed := int(time.Since(reconnectStart).Seconds())
+				reconnectLogger.Replacef("@(dim)Reconnecting (%ds)...@(r)", elapsed)
 				err = ctx.Connect()
 				if err == nil {
-					ctx.Logger().Printf("Reconnected.\n")
+					reconnectLogger.Replacef("@(dim:Connection re-established after %d seconds.)\n", elapsed)
 					break
 				} else {
-					ctx.Logger().Printf("@(dim:Error while reconnecting: %v)\n", err)
+					netErr, ok := err.(net.Error)
+					if !ok || !netErr.Timeout() {
+						logger.Printf("@(dim:Error while reconnecting: %v)\n", err)
+					}
 				}
 			}
+			reconnectLogger.Close()
 		}
 	}()
 	err = <-firstTimeChan
@@ -439,12 +449,14 @@ func Shutdown(reason string) {
 	done := make(chan bool)
 	for _, _ctx := range AllSyncContexts {
 		go func(ctx *SyncContext) {
-			ctx.KillAllSessions()
-			// This generally shouldn't *do* anything other than
-			// clean up the PID files, as the killing would have
-			// been done already in KillAllSessions.
-			ctx.KillAllViaPidfiles()
-			ctx.Close()
+			if ctx.IsConnected() {
+				ctx.KillAllSessions()
+				// This generally shouldn't *do* anything other than
+				// clean up the PID files, as the killing would have
+				// been done already in KillAllSessions.
+				ctx.KillAllViaPidfiles()
+				ctx.Close()
+			}
 			done <- true
 		}(_ctx)
 	}

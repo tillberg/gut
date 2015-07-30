@@ -208,7 +208,8 @@ func (ctx *SyncContext) KillAllViaPidfiles() {
 	}
 	files, err := ctx.ListDirectory(ctx.AbsPath(PidfilesPath))
 	if err != nil {
-		logger.Bail(err)
+		logger.Printf("Encountered error while listing pidfiles: %v\n", err)
+		return
 	}
 	for _, filename := range files {
 		parts := strings.Split(filename, ".")
