@@ -5,6 +5,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
+	"io"
 	"os"
 	"os/signal"
 	"os/user"
@@ -16,9 +17,9 @@ import (
 )
 
 var OptsCommon struct {
-	Verbose     bool `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Version     bool `long:"version"`
-	NoColor     bool `long:"no-color"`
+	Verbose bool `short:"v" long:"verbose" description:"Show verbose debug information"`
+	Version bool `long:"version"`
+	NoColor bool `long:"no-color"`
 }
 
 var OptsSync struct {
@@ -34,6 +35,51 @@ type FileEvent struct {
 }
 
 const commitDebounceDuration = 100 * time.Millisecond
+
+func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err error) {
+	isFirstTime := true
+	firstTimeChan := make(chan error)
+	connect := func(errChan chan error) {
+		_, tunnelErrChan, err := ctx.ReverseTunnel(srcAddr, destAddr)
+		if isFirstTime {
+			firstTimeChan <- err
+		}
+		if err != nil {
+			errChan <- err
+		} else {
+			errChan <- <-tunnelErrChan
+		}
+	}
+
+	go func() {
+		for {
+			errChan := make(chan error)
+			go connect(errChan)
+			err := <-errChan
+			if err == io.EOF {
+				ctx.Logger().Printf("@(dim:Encountered EOF on reverse tunnel from) %s @(dim:to) %s\n", srcAddr, destAddr)
+			} else {
+				ctx.Logger().Printf("@(error:Encountered error on reverse tunnel from) %s @(error:to) %s@(error:: %v)\n", srcAddr, destAddr)
+			}
+			ctx.Logger().Printf("@(dim:Waiting a moment before re-connecting...)\n")
+			for {
+				ctx.Close()
+				time.Sleep(time.Second)
+				ctx.Logger().Printf("@(dim:Reconnecting...)\n")
+				err = ctx.Connect()
+				if err == nil {
+					ctx.Logger().Printf("Reconnected.\n")
+					break
+				} else {
+					ctx.Logger().Printf("@(dim:Error while reconnecting: %v)\n", err)
+				}
+			}
+		}
+	}()
+
+	err = <-firstTimeChan
+	return err
+}
 
 func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	status := local.NewLogger("sync")
@@ -89,7 +135,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	for _, ctx := range remotes {
 		if !ctx.IsLocal() {
 			goTask(ctx, func(taskCtx *SyncContext) {
-				err = taskCtx.ReverseTunnel(gutdAddr, gutdAddr)
+				err = taskCtx.StartReverseTunnel(gutdAddr, gutdAddr)
 				if err != nil {
 					status.Bail(err)
 				}
