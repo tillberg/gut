@@ -36,8 +36,9 @@ type FileEvent struct {
 }
 
 const commitDebounceDuration = 100 * time.Millisecond
+const reconnectMinDelay = 5 * time.Second
 
-func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err error) {
+func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (reconnectChan chan bool, err error) {
 	isFirstTime := true
 	firstTimeChan := make(chan error)
 	go func() {
@@ -61,26 +62,35 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err
 			reconnectLogger := ctx.NewLogger("")
 			reconnectStart := time.Now()
 			for {
-				time.Sleep(time.Second)
 				elapsed := int(time.Since(reconnectStart).Seconds())
 				reconnectLogger.Replacef("@(dim)Reconnecting (%ds)...@(r)", elapsed)
+				connectStartTime := time.Now()
 				err = ctx.Connect()
 				if err == nil {
 					reconnectLogger.Replacef("@(dim:Connection re-established after %d seconds.)\n", elapsed)
+					reconnectChan <- true
 					break
 				} else {
 					netErr, ok := err.(net.Error)
 					if !ok || !netErr.Timeout() {
 						logger.Printf("@(dim:Error while reconnecting: %v)\n", err)
 					}
+					// Rate-limit calls to Connect. The delay should be zero on timeout errors, assuming that the
+					// network timeout in bismuth is greater than reconnectMinDelay.
+					time.Sleep(reconnectMinDelay - time.Since(connectStartTime))
 				}
 			}
 			reconnectLogger.Close()
 		}
 	}()
+	reconnectChan = make(chan bool)
 	err = <-firstTimeChan
-	return err
+	return reconnectChan, err
 }
+
+const reconnectBufferLength = 2
+const eventBufferLength = 100
+const forceFullSyncCheckString = "**force full sync check**"
 
 func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	status := local.NewLogger("sync")
@@ -109,6 +119,8 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	gutdAddr := fmt.Sprintf("localhost:%d", gutdPort)
 	repoName := RandSeq(8)
 
+	eventChan := make(chan FileEvent, eventBufferLength)
+
 	// Start up gut-daemon on the local host, and create a reverse tunnel from each of the remote hosts
 	// back to the local gut-daemon. All hosts can connect to gut-daemon at localhost:<gutdPort>, which
 	// makes configuration a little simpler.
@@ -136,10 +148,16 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	for _, ctx := range remotes {
 		if !ctx.IsLocal() {
 			goTask(ctx, func(taskCtx *SyncContext) {
-				err = taskCtx.StartReverseTunnel(gutdAddr, gutdAddr)
+				reconnectChan, err := taskCtx.StartReverseTunnel(gutdAddr, gutdAddr)
 				if err != nil {
 					status.Bail(err)
 				}
+				go func() {
+					for {
+						<-reconnectChan
+						eventChan <- FileEvent{taskCtx, forceFullSyncCheckString}
+					}
+				}()
 			})
 		}
 	}
@@ -262,8 +280,6 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	joinTasks()
 
-	eventChan := make(chan FileEvent)
-
 	commitScoped := func(src *SyncContext, changedPaths []string, updateUntracked bool) (changed bool, err error) {
 		prefix := CommonPathPrefix(changedPaths...)
 		if prefix != "" {
@@ -299,10 +315,12 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	var haveChanges bool
 	var changedPaths map[*SyncContext]map[string]bool
 	var changedIgnore map[*SyncContext]bool
+	var forceSyncCheck bool
 	clearChanges := func() {
 		haveChanges = false
 		changedPaths = make(map[*SyncContext]map[string]bool)
 		changedIgnore = make(map[*SyncContext]bool)
+		forceSyncCheck = false
 	}
 	clearChanges()
 	flushChanges := func() {
@@ -339,10 +357,11 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 				changedCtxs = append(changedCtxs, ctx)
 			}
 		}
-		clearChanges()
-		if len(changedCtxs) == 0 {
+		if !forceSyncCheck && len(changedCtxs) == 0 {
+			clearChanges()
 			return
 		}
+		clearChanges()
 
 		// Second phase, Push to local.
 		for _, ctx := range changedCtxs {
@@ -381,7 +400,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			err = <-done
 			if err == NeedsCommitError {
 				status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
-				eventChan <- FileEvent{ctx, "*"}
+				go func() {
+					eventChan <- FileEvent{ctx, forceFullSyncCheckString}
+				}()
 				err = nil
 			}
 			if err != nil {
@@ -395,14 +416,14 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		// the commit_and_update calls below and the time that the filesystem watches are attached.
 		for _, ctx := range allContexts {
 			// Queue up an event to force checking for changes.
-			eventChan <- FileEvent{ctx, "*"}
+			eventChan <- FileEvent{ctx, forceFullSyncCheckString}
 		}
 	}()
 
 	// Process messages from eventChan forever. Read as many messages as possible before needing to wait at least
 	// commitDebounceDuration, at which point we flush all the events (and commit & sync changes, etc).
+	var event FileEvent
 	for {
-		var event FileEvent
 		if haveChanges {
 			select {
 			case event = <-eventChan:
@@ -414,12 +435,18 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		} else {
 			event = <-eventChan
 		}
+		if event.filepath == forceFullSyncCheckString {
+			// Force an attempt to update all the remotes, even if there are no new commits.
+			forceSyncCheck = true
+			// And also force a full commit & update-untracked on this node
+			changedIgnore[event.ctx] = true
+		}
 		parts := strings.Split(event.filepath, "/")
 		skip := false
 		for _, part := range parts {
 			if part == ".gut" {
 				skip = true
-			} else if part == ".gutignore" || part == "*" {
+			} else if part == ".gutignore" {
 				changedIgnore[event.ctx] = true
 			}
 		}
