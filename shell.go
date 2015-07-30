@@ -19,56 +19,13 @@ var OptsCommon struct {
 	Verbose     bool `short:"v" long:"verbose" description:"Show verbose debug information"`
 	Version     bool `long:"version"`
 	NoColor     bool `long:"no-color"`
-	InstallDeps bool `long:"install-deps"`
 }
 
 var OptsSync struct {
 	IdentityFile string `short:"i" long:"identity"`
-	Dev          bool   `long:"dev"`
 	Positional   struct {
 		LocalPath string
 	} `positional-args:"yes" required:"yes"`
-}
-
-func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err error) {
-	status := ctx.Logger()
-	if ctx.HasGutInstalled() {
-		return false, nil
-	}
-	status.Printf("@(dim:Need to build gut on) %s@(dim:.)\n", ctx.NameAnsi())
-	err = ctx.EnsureGutFolders()
-	if err != nil {
-		status.Bail(err)
-	}
-	err = GutBuildPrepare(local, ctx)
-	if err != nil {
-		status.Bail(err)
-	}
-	var buildPath string
-	if ctx.IsLocal() {
-		if ctx.IsWindows() {
-			buildPath = GutWinSrcPath
-		} else {
-			buildPath = GutSrcPath
-		}
-	} else {
-		buildPath = GutSrcTmpPath
-		status := ctx.NewLogger("")
-		status.Printf("@(dim:Uploading) %s:@(path:%s) @(dim:to) %s:@(path:%s)@(dim:...)", local.NameAnsi(), GutSrcPath, ctx.NameAnsi(), buildPath)
-		local.UploadRecursiveExcludes(GutSrcPath, ctx.ExecContext, buildPath, []string{".git", "t"})
-		status.Printf(" @(dim: done.)\n")
-	}
-	err = ctx.GutBuild(buildPath)
-	if err != nil {
-		status.Bail(err)
-	}
-	status.Printf("@(dim:Cleaning up...)")
-	err = GutUnprepare(local, ctx)
-	if err != nil {
-		status.Bail(err)
-	}
-	status.Printf(" @(dim: done.)\n")
-	return true, nil
 }
 
 const commitDebounceDuration = 100 * time.Millisecond
