@@ -207,7 +207,7 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) (err err
 	return nil
 }
 
-const GutHashDisplayChars = 10
+const GutHashDisplayChars = 7
 
 func TrimCommit(commit string) string {
 	if len(commit) > GutHashDisplayChars {

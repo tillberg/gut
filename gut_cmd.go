@@ -142,7 +142,7 @@ func (ctx *SyncContext) GutFetch() (err error) {
 	status.Printf("@(dim:Fetching changes to) %s@(dim:...)\n", ctx.NameAnsi())
 	_, stderr, retCode, err := ctx.GutQuoteBuf("fetch", "fetch", "origin", "--progress")
 	if strings.Contains(string(stderr), "Cannot lock ref") {
-		status.Printf("RETCODE LOCK FAILURE: %d\n", retCode)
+		status.Printf("RETCODE FOR LOCK FAILURE IS: %d\n", retCode)
 	}
 	return err
 }
@@ -178,7 +178,7 @@ func (ctx *SyncContext) GutCommit(prefix string, updateUntracked bool) (changed 
 			}
 		}
 	}
-	status.Printf("@(dim:Checking) %s @(dim)for changes (scope=@(r)%s@(dim))...", ctx.NameAnsi(), prefix)
+	status.Printf("@(dim:Checking) %s @(dim)for changes (scope=@(r)%s@(dim))...\n", ctx.NameAnsi(), prefix)
 	_, err = ctx.GutQuote("add", "add", "--all", "--", prefix)
 	if err != nil {
 		return false, err
@@ -194,9 +194,9 @@ func (ctx *SyncContext) GutCommit(prefix string, updateUntracked bool) (changed 
 	// status.Printf("before: %s, after: %s", headBefore, headAfter)
 	madeACommit := headBefore != headAfter
 	if madeACommit {
-		status.Printf(" committed @(commit:%s)@(dim:.)\n", TrimCommit(headAfter))
+		status.Printf("@(dim:Committed) @(commit:%s)@(dim:.)\n", TrimCommit(headAfter))
 	} else {
-		status.Printf(" none@(dim:.)\n")
+		status.Printf("@(dim:No changes.)\n")
 	}
 	return madeACommit, nil
 }
