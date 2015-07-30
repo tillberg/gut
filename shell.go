@@ -447,7 +447,7 @@ func Shutdown(reason string) {
 }
 
 func main() {
-	log.EnableMultilineMode()
+	// log.EnableMultilineMode()
 	log.EnableColorTemplate()
 	log.AddAnsiColorCode("error", 31)
 	log.AddAnsiColorCode("commit", 32)
