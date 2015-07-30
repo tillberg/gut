@@ -293,3 +293,21 @@ func JoinWithAndAndCommas(strs ...string) string {
 	}
 	return buf.String()
 }
+
+func IsGitCommand(s string) bool {
+	for _, a := range AllGutCommands {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}
+
+func IsDangerousGitCommand(s string) bool {
+	for _, a := range DangerousGitCommands {
+		if a == s {
+			return true
+		}
+	}
+	return false
+}
