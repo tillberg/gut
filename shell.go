@@ -36,7 +36,7 @@ type FileEvent struct {
 }
 
 const commitDebounceDuration = 100 * time.Millisecond
-const reconnectMinDelay = 5 * time.Second
+const reconnectMinDelay = 2 * time.Second
 
 func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (reconnectChan chan bool, err error) {
 	isFirstTime := true
@@ -57,7 +57,9 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 			} else {
 				logger.Printf("@(error:Encountered error on reverse tunnel from) %s @(error:to) %s@(error:: %v)\n", srcAddr, destAddr)
 			}
-			listener.Close() // Ignore any errors; it might already be closed.
+			if listener != nil {
+				listener.Close() // Ignore any errors; it might already be closed.
+			}
 
 			reconnectLogger := ctx.NewLogger("")
 			reconnectStart := time.Now()
@@ -297,7 +299,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		}
 		changed, err = src.GutCommit(prefix, updateUntracked)
 		if err != nil {
-			status.Bail(err)
+			return false, err
 		}
 		return changed, nil
 	}
@@ -341,12 +343,14 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 				_, changedThisIgnore := changedIgnore[taskCtx]
 				changed, err := commitScoped(taskCtx, paths, changedThisIgnore)
 				if err != nil {
-					status.Bail(err)
-				}
-				if changed {
-					changedCtxChan <- taskCtx
-				} else {
+					status.Printf("@(error:Commit failed on) %s@(error:: %v)\n", taskCtx.NameAnsi(), err)
 					changedCtxChan <- nil
+				} else {
+					if changed {
+						changedCtxChan <- taskCtx
+					} else {
+						changedCtxChan <- nil
+					}
 				}
 			}(ctx, pathMap)
 		}
@@ -368,29 +372,43 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			if ctx != local {
 				err = ctx.GutPush()
 				if err != nil {
-					status.Bail(err)
+					status.Printf("@(error:Failed to push changes from) %s @(error:to local: %v)\n", ctx.NameAnsi(), err)
+					continue
 				}
 				err = local.GutMerge(ctx.BranchName())
 				if err != nil {
-					status.Bail(err)
+					status.Printf("@(error:Failed to merge) %s @(error:into) master@(error:: %v)\n", ctx.BranchName(), err)
 				}
 			}
 		}
-		localMasterCommit, err := local.GutRevParseHead()
-		if err != nil {
-			status.Bail(err)
-		}
+		masterCommitChan := make(chan string, len(remotes))
+		go func() {
+			masterCommit, err := local.GutRevParseHead()
+			if err != nil {
+				status.Printf("@(error:Failed to rev-parse head on local: %v)\n", err)
+				masterCommit = ""
+			}
+			for i := 0; i < len(remotes); i++ {
+				masterCommitChan <- masterCommit
+			}
+		}()
 
 		// Third phase, Pull to remotes.
 		done := make(chan error)
 		for _, ctx := range remotes {
 			go func(taskCtx *SyncContext) {
+				if !taskCtx.IsConnected() {
+					status.Printf("@(dim:Skipping sync to disconnected remote) %s\n", taskCtx.NameAnsi())
+					done <- nil
+					return
+				}
 				myCommit, err := taskCtx.GutRevParseHead()
 				if err != nil {
 					done <- err
 					return
 				}
-				if myCommit != localMasterCommit {
+				localMasterCommit := <-masterCommitChan
+				if localMasterCommit != "" && myCommit != localMasterCommit {
 					err = taskCtx.GutPull()
 				}
 				done <- err
@@ -406,7 +424,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 				err = nil
 			}
 			if err != nil {
-				status.Bail(err)
+				status.Printf("@(error:Failed to pull changes to) %s@(error:: %v)\n", ctx.NameAnsi(), err)
 			}
 		}
 	}
