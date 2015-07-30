@@ -28,6 +28,11 @@ var OptsSync struct {
 	} `positional-args:"yes" required:"yes"`
 }
 
+type FileEvent struct {
+	ctx      *SyncContext
+	filepath string
+}
+
 const commitDebounceDuration = 100 * time.Millisecond
 
 func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
@@ -92,6 +97,8 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		}
 	}
 	joinTasks()
+
+	// Fetch the tail hash for all contexts in parallel
 	for _, ctx := range allContexts {
 		goTask(ctx, func(taskCtx *SyncContext) {
 			taskCtx.UpdateTailHash()
@@ -99,7 +106,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	joinTasks()
 
-	// Find tailHash, if any. Bail if there are conflicting tailHashes.
+	// Iterate over the contexts, finding the common tailHash, if any. Bail if there are conflicting tailHashes.
 	tailHash := ""
 	var tailHashFoundOn *SyncContext
 	localTailHash := local.GetTailHash()
@@ -138,6 +145,8 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			}
 		}
 	}
+
+	// If local needs to be initialized, do so, either from scratch or by bootstrapping from tailHashFoundOn.
 	if localTailHash == "" {
 		if tailHash == "" {
 			status.Printf("@(dim:No existing gut repo found. Initializing gut repo in %s.)\n", local.SyncPathAnsi())
@@ -186,6 +195,8 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			}
 		})
 	}
+
+	// Bootstrap any non-local contexts that need it:
 	for _, ctx := range contextsNeedInit {
 		goTask(ctx, func(taskCtx *SyncContext) {
 			err := taskCtx.GutInit()
@@ -204,10 +215,6 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	joinTasks()
 
-	type FileEvent struct {
-		ctx      *SyncContext
-		filepath string
-	}
 	eventChan := make(chan FileEvent)
 
 	commitScoped := func(src *SyncContext, changedPaths []string, updateUntracked bool) (changed bool, err error) {
@@ -232,15 +239,12 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		return changed, nil
 	}
 
-	fileEventCallbackGen := func(ctx *SyncContext) func(filepath string) {
-		return func(filepath string) {
-			eventChan <- FileEvent{ctx, filepath}
-		}
-	}
-
+	// Start up an instance of fswatch/inotifywait for each context to watch for file changes
 	for _, ctx := range allContexts {
 		goTask(ctx, func(taskCtx *SyncContext) {
-			taskCtx.WatchForChanges(fileEventCallbackGen(taskCtx))
+			taskCtx.WatchForChanges(func(filepath string) {
+				eventChan <- FileEvent{taskCtx, filepath}
+			})
 		})
 	}
 	joinTasks()
@@ -255,6 +259,13 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	clearChanges()
 	flushChanges := func() {
+		// Flush all file changes, in three phases:
+		// - Commit on all nodes that have seen recent changes
+		// - Push and merge all changes to the local master
+		// - Pull changes back out to the remotes.
+
+		// First phase, Commit.
+		// (This is typically just one context, except at startup, when we create a pseudo-change event for each context.)
 		changedCtxChan := make(chan *SyncContext)
 		for ctx, pathMap := range changedPaths {
 			go func(taskCtx *SyncContext, taskPathMap map[string]bool) {
@@ -281,51 +292,55 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 				changedCtxs = append(changedCtxs, ctx)
 			}
 		}
-		if len(changedCtxs) > 0 {
-			for _, ctx := range changedCtxs {
-				if ctx != local {
-					err = ctx.GutPush()
-					if err != nil {
-						status.Bail(err)
-					}
-					err = local.GutMerge(ctx.BranchName())
-					if err != nil {
-						status.Bail(err)
-					}
+		clearChanges()
+		if len(changedCtxs) == 0 {
+			return
+		}
+
+		// Second phase, Push to local.
+		for _, ctx := range changedCtxs {
+			if ctx != local {
+				err = ctx.GutPush()
+				if err != nil {
+					status.Bail(err)
 				}
-			}
-			localMasterCommit, err := local.GutRevParseHead()
-			if err != nil {
-				status.Bail(err)
-			}
-			// Push the update out to all the remotes
-			done := make(chan error)
-			for _, ctx := range remotes {
-				go func(taskCtx *SyncContext) {
-					myCommit, err := taskCtx.GutRevParseHead()
-					if err != nil {
-						done <- err
-						return
-					}
-					if myCommit != localMasterCommit {
-						err = taskCtx.GutPull()
-					}
-					done <- err
-				}(ctx)
-			}
-			for _, ctx := range remotes {
-				err = <-done
-				if err == NeedsCommitError {
-					status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
-					eventChan <- FileEvent{ctx, "*"}
-					err = nil
-				}
+				err = local.GutMerge(ctx.BranchName())
 				if err != nil {
 					status.Bail(err)
 				}
 			}
 		}
-		clearChanges()
+		localMasterCommit, err := local.GutRevParseHead()
+		if err != nil {
+			status.Bail(err)
+		}
+
+		// Third phase, Pull to remotes.
+		done := make(chan error)
+		for _, ctx := range remotes {
+			go func(taskCtx *SyncContext) {
+				myCommit, err := taskCtx.GutRevParseHead()
+				if err != nil {
+					done <- err
+					return
+				}
+				if myCommit != localMasterCommit {
+					err = taskCtx.GutPull()
+				}
+				done <- err
+			}(ctx)
+		}
+		for _, ctx := range remotes {
+			err = <-done
+			if err == NeedsCommitError {
+				status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
+				eventChan <- FileEvent{ctx, "*"}
+				err = nil
+			}
+			if err != nil {
+				status.Bail(err)
+			}
+		}
 	}
 
 	go func() {
@@ -337,8 +352,10 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		}
 	}()
 
-	var event FileEvent
+	// Process messages from eventChan forever. Read as many messages as possible before needing to wait at least
+	// commitDebounceDuration, at which point we flush all the events (and commit & sync changes, etc).
 	for {
+		var event FileEvent
 		if haveChanges {
 			select {
 			case event = <-eventChan:
@@ -371,7 +388,6 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		}
 		ctxChanged[event.filepath] = true
 	}
-	return nil
 }
 
 var shutdownLock sync.Mutex
