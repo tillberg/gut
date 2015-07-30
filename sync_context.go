@@ -172,7 +172,36 @@ func (ctx *SyncContext) SaveDaemonPid(name string, pid int) (err error) {
 	return ctx.WriteFile(ctx.getPidfilePath(name), []byte(fmt.Sprintf("%d", pid)))
 }
 
-func (ctx *SyncContext) KillAllViaPidfiles() (err error) {
+func (ctx *SyncContext) KillViaPidfile(name string) (err error) {
+	logger := ctx.Logger()
+	pidfilePath := ctx.getPidfilePath(name)
+	valStr, err := ctx.ReadFile(pidfilePath)
+	if err != nil {
+		return err
+	}
+	pid, err := strconv.ParseInt(string(valStr), 10, 32)
+	if err != nil {
+		return err
+	}
+	// Is it still (presumably) running?
+	_, _, retCode, err := ctx.Run("pgrep", "-F", pidfilePath, name)
+	if err != nil {
+		return err
+	}
+	if retCode == 0 {
+		logger.Printf("@(dim)Killing %s (pid %d)...@(r)", name, pid)
+		err = ctx.Quote("pkill", "pkill", "-F", pidfilePath, name)
+		if err != nil {
+			logger.Printf(" @(error:failed, %s)@(dim:.)\n", err.Error())
+		} else {
+			logger.Printf(" done@(dim:.)\n")
+		}
+	}
+	ctx.DeleteFile(pidfilePath)
+	return nil
+}
+
+func (ctx *SyncContext) KillAllViaPidfiles() {
 	logger := ctx.Logger()
 	if ctx.IsWindows() {
 		logger.Bail(errors.New("Not implemented"))
@@ -187,27 +216,9 @@ func (ctx *SyncContext) KillAllViaPidfiles() (err error) {
 			continue
 		}
 		name := parts[0]
-		pidfilePath := ctx.getPidfilePath(name)
-		valStr, err := ctx.ReadFile(pidfilePath)
+		err := ctx.KillViaPidfile(name)
 		if err != nil {
-			logger.Bail(err)
+			logger.Printf("Error killing %s process via pidfile: %v\n", name, err)
 		}
-		pid, err := strconv.ParseInt(string(valStr), 10, 32)
-		if err != nil {
-			logger.Bail(err)
-		}
-		// Is it still (presumably) running?
-		_, _, retCode, err := ctx.Run("pgrep", "-F", pidfilePath, name)
-		if retCode == 0 {
-			logger.Printf("@(dim)Killing %s (pid %d)...@(r)", name, pid)
-			err = ctx.Quote("pkill", "pkill", "-F", pidfilePath, name)
-			if err != nil {
-				logger.Printf(" @(error:failed, %s)@(dim:.)\n", err.Error())
-			} else {
-				logger.Printf(" done@(dim:.)\n")
-			}
-		}
-		ctx.DeleteFile(pidfilePath)
 	}
-	return nil
 }

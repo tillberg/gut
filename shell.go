@@ -39,23 +39,16 @@ const commitDebounceDuration = 100 * time.Millisecond
 func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err error) {
 	isFirstTime := true
 	firstTimeChan := make(chan error)
-	connect := func(errChan chan error) {
-		_, tunnelErrChan, err := ctx.ReverseTunnel(srcAddr, destAddr)
-		if isFirstTime {
-			firstTimeChan <- err
-		}
-		if err != nil {
-			errChan <- err
-		} else {
-			errChan <- <-tunnelErrChan
-		}
-	}
-
 	go func() {
 		for {
-			errChan := make(chan error)
-			go connect(errChan)
-			err := <-errChan
+			_, tunnelErrChan, err := ctx.ReverseTunnel(srcAddr, destAddr)
+			if isFirstTime {
+				firstTimeChan <- err
+				isFirstTime = false
+			}
+			if err == nil {
+				err = <-tunnelErrChan
+			}
 			if err == io.EOF {
 				ctx.Logger().Printf("@(dim:Encountered EOF on reverse tunnel from) %s @(dim:to) %s\n", srcAddr, destAddr)
 			} else {
@@ -76,7 +69,6 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err
 			}
 		}
 	}()
-
 	err = <-firstTimeChan
 	return err
 }

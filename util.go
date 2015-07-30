@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func WindowsPathToMingwPath(p string) string {
@@ -159,8 +160,9 @@ func NewLineBuf(lineCallback func([]byte)) *LineBuf {
 	return &LineBuf{lineCallback, []byte{}}
 }
 
-func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) (err error) {
+func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 	watchType := ctx.GetCmd("inotifywait", "fswatch")
+	status := ctx.NewLogger(watchType)
 	args := []string{}
 	if watchType == "inotifywait" {
 		args = inotifyArgs(ctx, true)
@@ -168,43 +170,82 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) (err err
 		args = []string{"fswatch", "."}
 	} else {
 		if ctx.IsDarwin() {
-			panic("missing fswatch")
+			status.Fatalln("missing fswatch")
 		} else {
-			panic("missing inotifywait")
+			status.Fatalln("missing inotifywait")
 		}
 	}
-	status := ctx.NewLogger(watchType)
 	watchedRoot := ""
+	var err error
 	if ctx.IsWindows() {
 		watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "cmd", "/c", "cd ,")
 	} else {
 		watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "pwd", "-P")
 	}
 	if err != nil {
-		return err
+		status.Bail(err)
 	}
-	buf := NewLineBuf(func(b []byte) {
-		// status.Printf("Received: %q\n", string(b))
-		p := string(b)
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(watchedRoot, p)
+
+	isFirstTime := true
+	firstTimeChan := make(chan error)
+	go func() {
+		var err error
+		for {
+			if !isFirstTime {
+				status.Println("Killing via pidfile...\n")
+				err = ctx.KillViaPidfile(watchType)
+				if err != nil {
+					status.Printf("Error killing via pidfile: %v\n", err)
+					time.Sleep(2 * time.Second)
+					continue
+				}
+			}
+			buf := NewLineBuf(func(b []byte) {
+				// status.Printf("Received: %q\n", string(b))
+				p := string(b)
+				if !filepath.IsAbs(p) {
+					p = filepath.Join(watchedRoot, p)
+				}
+				relPath, err := filepath.Rel(watchedRoot, p)
+				if err != nil {
+					status.Bail(err)
+				}
+				// status.Printf("relPath: %q from %q\n", relPath, watchedRoot)
+				fileEventCallback(relPath)
+			})
+			status.Printf("Starting watcher...\n")
+			pid, retCodeChan, err := ctx.QuoteDaemonCwdPipeOut(watchType, watchedRoot, buf, args...)
+			if err != nil {
+				status.Printf("Error starting watcher: %v\n", err)
+			}
+			status.Printf("Saving watcher PID...\n")
+			err = ctx.SaveDaemonPid(watchType, pid)
+			if err != nil {
+				status.Printf("Error saving watcher PID: %v\n", err)
+			}
+
+			status.Printf("HI\n")
+			if isFirstTime {
+				firstTimeChan <- err
+				if err != nil {
+					return
+				}
+				isFirstTime = false
+			}
+			if err != nil {
+				status.Printf("Error starting watcher: %v\n", err)
+			} else {
+				status.Printf("Watcher started.\n")
+				<-retCodeChan
+				status.Printf("Watcher exited.\n")
+			}
+			time.Sleep(2 * time.Second)
 		}
-		relPath, err := filepath.Rel(watchedRoot, p)
-		if err != nil {
-			status.Bail(err)
-		}
-		// status.Printf("relPath: %q from %q\n", relPath, watchedRoot)
-		fileEventCallback(relPath)
-	})
-	pid, _, err := ctx.QuoteDaemonCwdPipeOut(watchType, watchedRoot, buf, args...)
+	}()
+	err = <-firstTimeChan
 	if err != nil {
-		return err
+		status.Bail(err)
 	}
-	err = ctx.SaveDaemonPid(watchType, pid)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 const GutHashDisplayChars = 7
