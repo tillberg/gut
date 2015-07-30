@@ -173,7 +173,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
 				}
 				goTask(ctx, func(taskCtx *SyncContext) {
-					err := ctx.GutSetupOrigin(repoName, gutdPort)
+					err := taskCtx.GutSetupOrigin(repoName, gutdPort)
 					if err != nil {
 						status.Bail(err)
 					}
@@ -223,7 +223,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		}
 	} else {
 		goTask(local, func(taskCtx *SyncContext) {
-			err := local.GutSetupOrigin(repoName, gutdPort)
+			err := taskCtx.GutSetupOrigin(repoName, gutdPort)
 			if err != nil {
 				status.Bail(err)
 			}
@@ -231,15 +231,15 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	}
 	for _, ctx := range contextsNeedInit {
 		goTask(ctx, func(taskCtx *SyncContext) {
-			err := ctx.GutInit()
+			err := taskCtx.GutInit()
 			if err != nil {
 				status.Bail(err)
 			}
-			err = ctx.GutSetupOrigin(repoName, gutdPort)
+			err = taskCtx.GutSetupOrigin(repoName, gutdPort)
 			if err != nil {
 				status.Bail(err)
 			}
-			err = ctx.GutPull()
+			err = taskCtx.GutPull()
 			if err != nil {
 				status.Bail(err)
 			}
