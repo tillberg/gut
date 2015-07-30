@@ -181,7 +181,8 @@ func (ctx *SyncContext) KillViaPidfile(name string) (err error) {
 	}
 	pid, err := strconv.ParseInt(string(valStr), 10, 32)
 	if err != nil {
-		return err
+		logger.Printf("@(error:Ignoring pidfile for) %s @(error:due to invalid contents [%s])\n", name, string(valStr))
+		return nil
 	}
 	// Is it still (presumably) running?
 	_, _, retCode, err := ctx.Run("pgrep", "-F", pidfilePath, name)

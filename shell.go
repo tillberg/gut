@@ -43,11 +43,14 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 	firstTimeChan := make(chan error)
 	go func() {
 		logger := ctx.Logger()
+		lastConnectStartTime := time.Now()
 		for {
 			listener, tunnelErrChan, err := ctx.ReverseTunnel(srcAddr, destAddr)
 			if isFirstTime {
 				firstTimeChan <- err
 				isFirstTime = false
+			} else {
+				reconnectChan <- true
 			}
 			if err == nil {
 				err = <-tunnelErrChan
@@ -55,7 +58,7 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 			if err == io.EOF {
 				logger.Printf("@(error:Connection lost.)\n")
 			} else {
-				logger.Printf("@(error:Encountered error on reverse tunnel from) %s @(error:to) %s@(error:: %v)\n", srcAddr, destAddr)
+				logger.Printf("@(error:Encountered error on reverse-tunnel: %v)\n", err)
 			}
 			if listener != nil {
 				listener.Close() // Ignore any errors; it might already be closed.
@@ -66,20 +69,31 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 			for {
 				elapsed := int(time.Since(reconnectStart).Seconds())
 				reconnectLogger.Replacef("@(dim)Reconnecting (%ds)...@(r)", elapsed)
-				connectStartTime := time.Now()
+
+				// Rate-limit calls to Connect. The delay should be zero on timeout errors, assuming that the
+				// network timeout in bismuth is greater than reconnectMinDelay.
+				time.Sleep(reconnectMinDelay - time.Since(lastConnectStartTime))
+				lastConnectStartTime = time.Now()
 				err = ctx.Connect()
-				if err == nil {
-					reconnectLogger.Replacef("@(dim:Connection re-established after %d seconds.)\n", elapsed)
-					reconnectChan <- true
-					break
-				} else {
+				if err != nil {
+					squelch := false
 					netErr, ok := err.(net.Error)
-					if !ok || !netErr.Timeout() {
+					if ok && netErr.Timeout() {
+						squelch = true
+					}
+					errStr := err.Error()
+					if strings.Contains(errStr, "no route to host") {
+						squelch = true
+					}
+					if strings.Contains(errStr, "connection refused") {
+						squelch = true
+					}
+					if !squelch {
 						logger.Printf("@(dim:Error while reconnecting: %v)\n", err)
 					}
-					// Rate-limit calls to Connect. The delay should be zero on timeout errors, assuming that the
-					// network timeout in bismuth is greater than reconnectMinDelay.
-					time.Sleep(reconnectMinDelay - time.Since(connectStartTime))
+				} else {
+					reconnectLogger.Replacef("@(dim:Connection re-established after %d seconds.)\n", elapsed)
+					break
 				}
 			}
 			reconnectLogger.Close()
