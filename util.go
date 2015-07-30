@@ -192,11 +192,13 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 		var err error
 		for {
 			if !isFirstTime {
-				status.Println("Killing via pidfile...\n")
+				time.Sleep(2 * time.Second)
 				err = ctx.KillViaPidfile(watchType)
+				if err == bismuth.NotConnectedError {
+					continue
+				}
 				if err != nil {
-					status.Printf("Error killing via pidfile: %v\n", err)
-					time.Sleep(2 * time.Second)
+					status.Printf("Error killing previous %s process via pidfile: %v\n", watchType, err)
 					continue
 				}
 			}
@@ -213,18 +215,25 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 				// status.Printf("relPath: %q from %q\n", relPath, watchedRoot)
 				fileEventCallback(relPath)
 			})
-			status.Printf("Starting watcher...\n")
 			pid, retCodeChan, err := ctx.QuoteDaemonCwdPipeOut(watchType, watchedRoot, buf, args...)
 			if err != nil {
-				status.Printf("Error starting watcher: %v\n", err)
+				if isFirstTime {
+					firstTimeChan <- err
+					return
+				}
+				status.Printf("Error starting %s: %v\n", watchType, err)
+				continue
 			}
-			status.Printf("Saving watcher PID...\n")
 			err = ctx.SaveDaemonPid(watchType, pid)
 			if err != nil {
-				status.Printf("Error saving watcher PID: %v\n", err)
+				if isFirstTime {
+					firstTimeChan <- err
+					return
+				}
+				status.Printf("Error saving PID for %s: %v\n", watchType, err)
+				continue
 			}
 
-			status.Printf("HI\n")
 			if isFirstTime {
 				firstTimeChan <- err
 				if err != nil {
@@ -235,11 +244,10 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 			if err != nil {
 				status.Printf("Error starting watcher: %v\n", err)
 			} else {
-				status.Printf("Watcher started.\n")
+				status.Printf("@(dim:Watcher started.)\n")
 				<-retCodeChan
-				status.Printf("Watcher exited.\n")
+				status.Printf("@(dim:Watcher exited.)\n")
 			}
-			time.Sleep(2 * time.Second)
 		}
 	}()
 	err = <-firstTimeChan

@@ -54,7 +54,6 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (err
 			} else {
 				ctx.Logger().Printf("@(error:Encountered error on reverse tunnel from) %s @(error:to) %s@(error:: %v)\n", srcAddr, destAddr)
 			}
-			ctx.Logger().Printf("@(dim:Waiting a moment before re-connecting...)\n")
 			for {
 				ctx.Close()
 				time.Sleep(time.Second)
