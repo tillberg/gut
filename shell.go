@@ -626,6 +626,7 @@ func main() {
 				status.Bail(err)
 			}
 			local.KillAllViaPidfiles()
+			local.SaveDaemonPid("gut", os.Getpid())
 			ready <- true
 		}()
 
