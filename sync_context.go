@@ -218,6 +218,10 @@ func (ctx *SyncContext) KillAllViaPidfiles() {
 			continue
 		}
 		name := parts[0]
+		if name == "gut" && ctx.IsLocal() {
+			// Only kill gut if it's on a different host
+			continue
+		}
 		err := ctx.KillViaPidfile(name)
 		if err != nil {
 			logger.Printf("Error killing %s process via pidfile: %v\n", name, err)

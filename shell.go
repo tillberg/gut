@@ -35,6 +35,19 @@ type FileEvent struct {
 	filepath string
 }
 
+const shutdownChanLen = 20
+
+var shutdownChan = make(chan bool, shutdownChanLen)
+
+func IsShuttingDown() bool {
+	select {
+	case <-shutdownChan:
+		return true
+	default:
+		return false
+	}
+}
+
 const commitDebounceDuration = 100 * time.Millisecond
 const reconnectMinDelay = 2 * time.Second
 
@@ -54,6 +67,9 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 			}
 			if err == nil {
 				err = <-tunnelErrChan
+			}
+			if IsShuttingDown() {
+				return
 			}
 			if err == io.EOF {
 				logger.Printf("@(error:Connection lost.)\n")
@@ -500,6 +516,9 @@ var shutdownLock sync.Mutex
 
 func Shutdown(reason string) {
 	shutdownLock.Lock()
+	for i := 0; i < shutdownChanLen; i++ {
+		shutdownChan <- true
+	}
 	status := log.New(os.Stderr, "", 0)
 	if reason != "" {
 		status.Printf("%s ", reason)
