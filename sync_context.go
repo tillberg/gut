@@ -23,8 +23,7 @@ var AllSyncContexts = []*SyncContext{}
 
 func NewSyncContext() *SyncContext {
 	ctx := &SyncContext{}
-	ctx.ExecContext = &bismuth.ExecContext{}
-	ctx.Init()
+	ctx.ExecContext = bismuth.NewExecContext()
 	AllSyncContexts = append(AllSyncContexts, ctx)
 	return ctx
 }
@@ -191,7 +190,7 @@ func (ctx *SyncContext) KillViaPidfile(name string) (err error) {
 	}
 	if retCode == 0 {
 		logger.Printf("@(dim)Killing %s (pid %d)...@(r)", name, pid)
-		err = ctx.Quote("pkill", "pkill", "-F", pidfilePath, name)
+		_, err = ctx.Quote("pkill", "pkill", "-F", pidfilePath, name)
 		if err != nil {
 			logger.Printf(" @(error:failed, %s)@(dim:.)\n", err.Error())
 		} else {

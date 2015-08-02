@@ -130,7 +130,7 @@ func GitCloneUpdate(local *SyncContext, localPath string, repoUrl string, versio
 	if !exists {
 		p := local.AbsPath(localPath)
 		status.Printf("@(dim:Cloning) %s @(dim:into) @(path:%s)@(dim:...)\n", repoUrl, p)
-		err = local.Quote("git-clone", "git", "clone", "--progress", repoUrl, p)
+		_, err = local.Quote("git-clone", "git", "clone", "--progress", repoUrl, p)
 		if err != nil {
 			return err
 		}
@@ -236,7 +236,7 @@ func GutUnprepare(local *SyncContext, ctx *SyncContext) (err error) {
 		GitHardResetAndClean(local, GutSrcPath, GitRepoUrl, GitVersion)
 	}
 	if !ctx.IsLocal() {
-		err = ctx.Quote("cleanup", "rm", "-r", ctx.AbsPath(GutSrcTmpPath))
+		_, err = ctx.Quote("cleanup", "rm", "-r", ctx.AbsPath(GutSrcTmpPath))
 		if err != nil {
 			return err
 		}
