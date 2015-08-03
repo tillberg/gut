@@ -82,9 +82,11 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 
 			reconnectLogger := ctx.NewLogger("")
 			reconnectStart := time.Now()
+			elapsedSeconds := func() int {
+				return int(time.Since(reconnectStart).Seconds())
+			}
 			for {
-				elapsed := int(time.Since(reconnectStart).Seconds())
-				reconnectLogger.Replacef("@(dim)Reconnecting (%ds)...@(r)", elapsed)
+				reconnectLogger.Replacef("@(dim)Reconnecting (%ds)...@(r)", elapsedSeconds())
 
 				// Rate-limit calls to Connect. The delay should be zero on timeout errors, assuming that the
 				// network timeout in bismuth is greater than reconnectMinDelay.
@@ -108,7 +110,7 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 						logger.Printf("@(dim:Error while reconnecting: %v)\n", err)
 					}
 				} else {
-					reconnectLogger.Replacef("@(dim:Connection re-established after %d seconds.)\n", elapsed)
+					reconnectLogger.Replacef("@(dim:Connection re-established after %d seconds.)\n", elapsedSeconds())
 					break
 				}
 			}
