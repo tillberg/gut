@@ -52,8 +52,10 @@ You want to create a pair of linked folders, **~/work** locally and **~/work2** 
 prompt you about anything extra that you need to install.)
 
 ```sh
-$ gut sync ~/work my.server.com:~/work
+$ gut sync ~/work username@my.server.com:~/work
 ```
+
+![Animated Gif showing initial setup](https://www.tillberg.us/c/119d8cb31272eddb3984f9a7557a0ddce0b43580/gut-init.gif)
 
 This command sets up a gut repo locally in ~/work and clones it to your ~/work2
 directory on my.server.com, then starts watching the filesystem on both ends for
@@ -80,6 +82,8 @@ $ git log --stat
 $ gut log --stat
 # ... <- You should see *all* the file changes recorded here, including inside ~/work2/gut/.git/
 ```
+
+![Animated Gif showing git folders syncing over gut](https://www.tillberg.us/c/eb78b0141cc960b45e4651753a6486c00f4918be/gut-git.gif)
 
 Configuration
 =============
