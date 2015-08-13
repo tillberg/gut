@@ -44,6 +44,23 @@ func (ctx *SyncContext) listMissingRemoteDeps() []string {
 		if !ctx.tryRun("autoconf", "--version") {
 			missing = append(missing, "autoconf")
 		}
+		if !ctx.tryRun("make", "--version") || !ctx.tryRun("gcc", "--version") {
+			missing = append(missing, "build-essential")
+		}
+		if ctx.IsLinux() {
+			// On errors, just skip this check
+			exists, err := ctx.PathExists("/usr/local/include/zlib.h")
+			if err == nil {
+				if !exists {
+					exists, err = ctx.PathExists("/usr/include/zlib.h")
+					if err == nil {
+						if !exists {
+							missing = append(missing, "zlib1g-dev")
+						}
+					}
+				}
+			}
+		}
 		if ctx.IsLinux() && !ctx.tryRun("msgfmt", "--version") {
 			missing = append(missing, "gettext")
 		}
@@ -95,7 +112,7 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 
 	installCmd := ""
 	if ctx.IsLinux() {
-		installCmd = "sudo apt-get install"
+		installCmd = "sudo apt-get update && sudo apt-get install"
 	} else if ctx.IsDarwin() {
 		installCmd = "brew install"
 	} else {
@@ -119,12 +136,19 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 		}
 	}
 	logger.Printf("@(dim:Attempting to install) %s on %s@(dim:...)\n", depsStrLong, ctx.NameAnsi())
-	retCode, err := ctx.ShellInteractive(installCmd)
-	if err != nil {
-		logger.Bail(err)
+	var retCode int
+	for _, cmd := range strings.Split(installCmd, " && ") {
+		retCode, err = ctx.ShellInteractive(cmd)
+		if err != nil {
+			logger.Bail(err)
+		}
+		if retCode != 0 {
+			break
+		}
 	}
 	if retCode == 0 {
 		logger.Printf("@(dim:Successfully installed) %s@(dim:.)\n", depsStrLong)
+		ctx.ResetHasGutInstalled()
 	} else {
 		logger.Printf("@(error:Installation failed.)\n")
 		Shutdown("")

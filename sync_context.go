@@ -85,6 +85,10 @@ func (ctx *SyncContext) GutExe() string {
 	return ctx.AbsPath(GutExePath)
 }
 
+func (ctx *SyncContext) ResetHasGutInstalled() {
+	ctx.hasGutInstalled = nil
+}
+
 func (ctx *SyncContext) HasGutInstalled() bool {
 	if ctx.hasGutInstalled == nil {
 		hasGutInstalled := ctx._hasGutInstalled()
