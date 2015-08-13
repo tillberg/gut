@@ -166,7 +166,7 @@ func (ctx *SyncContext) getPidfilePath(name string) string {
 func (ctx *SyncContext) SaveDaemonPid(name string, pid int) (err error) {
 	err = ctx.Mkdirp(PidfilesPath)
 	if err != nil {
-		ctx.Logger().Bail(err)
+		return err
 	}
 	return ctx.WriteFile(ctx.getPidfilePath(name), []byte(fmt.Sprintf("%d", pid)))
 }

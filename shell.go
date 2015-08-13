@@ -400,6 +400,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		clearChanges()
 
 		// Second phase, Push to local.
+		// XXX if remote has a previous change (i.e. from when it was the local), we don't necessarily pick up that change here.
 		for _, ctx := range changedCtxs {
 			if ctx != local {
 				err = ctx.GutPush()
@@ -541,7 +542,10 @@ func Shutdown(reason string) {
 		}(_ctx)
 	}
 	for range AllSyncContexts {
-		<-done
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+		}
 	}
 	status.Printf("Exiting.")
 	fmt.Println()
