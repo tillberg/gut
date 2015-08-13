@@ -14,30 +14,33 @@ Gut solves this problem by using a modified version of git to synchronize change
 between multiple systems (it currently syncs only two at a time, but it could be
 patched to support N remotes) in real-time.
 
-Installation
-============
+Installation from source
+========================
 
-You'll need **pip** and the python dev headers installed first in order to install **gut**.
-To get **pip**, check out https://pip.pypa.io/en/latest/installing.html.
+You'll need the go compiler installed (v1.4 or later) first. The [Go Install][Go install documentation]
+is a good place to start if you haven't set it up already.
 
-You might be able to just do one of these:
-
-```sh
-(Ubuntu) $ sudo apt-get install python-pip python-dev
-(OSX w/easy_install) $ sudo easy_install pip
-```
-
-First, install **gut** via **pip**.
+After you have Go installed, you also need to [Go Setup][set your GOPATH]. You probably just want to
+use the defaults: (add these to your `.profile`/`.bash_profile` to persist to new shell sessions)
 
 ```sh
-$ pip install gut
+export GOPATH=$HOME/go
+export PATH=$PATH:$GOPATH/bin
 ```
 
-Depending on your system you may need to prepend "sudo":
+To install **gut** to $GOPATH/bin, just run:
 
 ```sh
-$ sudo pip install gut
+go get github.com/tillberg/gut
 ```
+
+Installation via curlbash
+=========================
+
+If you have not a care for security, you could just cross your fingers and run this:
+
+
+
 
 Getting Started
 ===============
@@ -63,9 +66,9 @@ Open up a second terminal and make gut do some work:
 $ cd ~/work
 $ git clone https://github.com/tillberg/gut.git
 $ cd gut
-$ rm -r gut/
-$ git add --all .
-$ git commit -m "Fixed"
+$ rm util_test.go
+$ git add . --all
+$ git commit -m 'made all tests pass'
 ```
 
 Then hop onto the other host and take a look at what's there.
@@ -78,21 +81,30 @@ $ gut log --stat
 # ... <- You should see *all* the file changes recorded here, including inside ~/work2/gut/.git/
 ```
 
+Configuration
+=============
+
 To exclude files from gut-sync, use **.gutignore** files just as you'd use **.gitignore** over in
 git-world.
 
 SSH Authentication Issues
 =========================
 
-By default, **gut-sync** uses paramiko to make the primary SSH connection to the remote host. If you
-have trouble connection/authenticating, try specifying `--use-openssl`. The OpenSSL-based plumbum
-machinery isn't quite as fast/efficient as paramiko, but it might work for you.
+**gut-sync** connects to the ssh agent specified by `SSH_AUTH_SOCK` and uses the experimental
+[crypto/ssh][golang.org/x/crypto/ssh] SSH client. This does not, for example, read any settings
+in ~/.ssh/config, and it may differ in a number of other ways from using the `ssh` OpenSSH client,
+such as Username settings and Hostname aliases. For many, this will work just fine (as it does
+on all of my systems). If it doesn't work for you, though, please create issues and/or PRs with
+as much detail as you can provide about where it breaks down (thanks!).
 
 Supported OSes
 ==============
 
-**gut** has been tested on **OSX** and **Ubuntu** as both the local and remote hosts, and on
-**Windows** as the local host (i.e. with OSX or Ubuntu on the other end).
+**gut** has been tested on **OSX** and **Ubuntu** as both the local and remote hosts.
+
+I've done some implementation work for Windows (and had a fully-functioning Python implementation
+before porting to Go -- it's definitely feasible), and so if you're interested in either using that
+or helping to implement, open up an issue for discussion and/or tag https://github.com/tillberg/gut/issues/4.
 
 Gut is like Git, but with more U and less I
 ===========================================
@@ -133,3 +145,7 @@ Invalid command: 'gut-receive-pack 'tillberg/test.git''
   GIT_PROXY_COMMAND environment variable are NOT set.
 fatal: Could not read from remote repository.
 ```
+
+[Go Install]: https://golang.org/doc/install
+[Go Setup]: https://golang.org/doc/code.html
+[crypto/ssh]: https://godoc.org/golang.org/x/crypto/ssh
