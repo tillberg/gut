@@ -552,6 +552,17 @@ func Shutdown(reason string) {
 	os.Exit(1)
 }
 
+func printUsageInfoAndExit() {
+	status := log.New(os.Stderr, "", 0)
+	status.Println("Usage: gut sync [--no-color] [--verbose] localpath [{ [user@]host:path | localpath }...]")
+	status.Println("Examples:")
+	status.Println("   Sync folder with one remote: gut sync ~/stuff/ myname@remotehost.com:~/stuff/")
+	status.Println("  Sync folder with two remotes: gut sync stuff/ remotehost1.com:~/work/ bob@remotehost2.com:/tmp/sync")
+	status.Println("          Sync folders locally: gut sync ~/mywork /mnt/backup/mywork/")
+	status.Println("Just track changes, no syncing: gut sync ~/mywork")
+	os.Exit(0)
+}
+
 func main() {
 	log.EnableMultilineMode()
 	log.EnableColorTemplate()
@@ -595,9 +606,11 @@ func main() {
 	args = args[1:]
 	var argsRemaining, err = flags.ParseArgs(&OptsCommon, args)
 	if err != nil {
-		status.Bail(err)
+		printUsageInfoAndExit()
 	}
-	// fmt.Printf("color: %s\n", OptsCommon.NoColor)
+	if OptsCommon.NoColor {
+		log.DisableColor()
+	}
 	if OptsCommon.Version {
 		status.Print("gut-sync version XXXXX")
 		os.Exit(0)
@@ -631,7 +644,7 @@ func main() {
 	} else if cmd == "sync" {
 		var remoteArgs, err = flags.ParseArgs(&OptsSync, argsRemaining)
 		if err != nil {
-			status.Bail(err)
+			printUsageInfoAndExit()
 		}
 
 		ready := make(chan bool)
