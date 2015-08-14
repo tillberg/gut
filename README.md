@@ -55,8 +55,10 @@ With that all configured, to install **gut** into $GOPATH/bin, run:
 go get github.com/tillberg/gut
 ```
 
-The first time you run **gut-sync** on each host, it will build its dependencies and
-prompt you about extra dependencies that you need to download & install.
+By default **gut-sync** will download (and verify) pre-built binaries for gut-commands.
+You can optionally build these from source; much of the process is actually automated
+but requires the same dependencies (build-essentials, autoconf, etc) required to build
+git from source. To do so, use `--build-deps`, i.e. `gut sync --build-deps ...`.
 
 Getting Started
 ===============
