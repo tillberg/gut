@@ -2,20 +2,21 @@ gut (gut-sync)
 ==============
 
 What would happen if you took git, sed, rsync, and inotify, and you mushed and kneaded
-them together until smooth? You'd get gut-sync: real-time bi-directional folder synchronization.
+them together until smooth? You'd get **gut-sync**: *real-time bi-directional folder synchronization*.
 
 I wrote gut so that I can edit source code locally on my desktop, have the programs I'm
 working on run either in the cloud or in a VM, and then I can seamlessly transition
 to a laptop -- with all of my changes synced continuously to each of these machines.
 I don't want to work with flakey remote filesystems, and I do want to have inotify
 (or kqueue or FSEvents or whatever) work correctly so that I can kick off builds just
-by pressing Ctrl-S in my editor.
+by hitting Save in my editor.
 
-Gut solves this problem for me by using a modified version of git to synchronize changes
-between multiple (1 to N) systems in real-time. **gut-sync** is ultimately a glorified
-(and fairly smart) shell script (written in Go) that uses inotifywait/fswatch to listen
-for file changes, and then orchestrates calls to gut-commands (e.g. gut-add and gut-fetch)
-on each system in order to keep all systems up-to-date.
+**gut-sync** solves this problem for me by using a modified version of git to synchronize
+changes between multiple (1 to N) systems in real-time. It's efficient and stable, written
+in Go, but it's sort of like a big shell script written in Go: all the heavy lifting is done
+by calling out to other utilities. It uses inotifywait (on Linux) or fswatch (on OSX) to
+listen for file changes, and then orchestrates calls to gut-commands (such as gut-add or
+gut-fetch) on each system in order to keep all systems up-to-date.
 
 ![Animated Gif showing git folders syncing over gut](https://www.tillberg.us/c/eb78b0141cc960b45e4651753a6486c00f4918be/gut-git.gif)
 
