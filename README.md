@@ -58,8 +58,6 @@ go get github.com/tillberg/gut
 The first time you run **gut-sync** on each host, it will build its dependencies and
 prompt you about extra dependencies that you need to download & install.
 
-![Animated Gif showing dependency detection and build](https://www.tillberg.us/c/2711f3d361ef0b528749461b0bda49da578841fbab2918d4530b3f75d8ce531c/gut-build.gif)
-
 Getting Started
 ===============
 
