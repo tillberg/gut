@@ -23,6 +23,8 @@ const GutDaemonPath = GutPath + "/repos"
 const MinRandomPort = 34000
 const MaxRandomPort = 34999
 
+var buildDependencies = false
+
 // Ignore files that are probably transient or machine-specific by default.
 // You can add/remove additional globs to both the root .gutignore and to
 // any other .gutignore file in the repo hierarchy.

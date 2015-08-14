@@ -18,9 +18,10 @@ import (
 )
 
 var OptsCommon struct {
-	Verbose bool `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Version bool `long:"version"`
-	NoColor bool `long:"no-color"`
+	Verbose   bool `short:"v" long:"verbose" description:"Show verbose debug information"`
+	Version   bool `long:"version"`
+	NoColor   bool `long:"no-color"`
+	BuildDeps bool `long:"build-deps"`
 }
 
 var OptsSync struct {
@@ -69,6 +70,7 @@ func (ctx *SyncContext) StartReverseTunnel(srcAddr string, destAddr string) (rec
 				err = <-tunnelErrChan
 			}
 			if IsShuttingDown() {
+				logger.Printf("@(dim)Reverse tunnel exiting (shutting down).@(r)\n")
 				return
 			}
 			if err == io.EOF {
@@ -554,12 +556,20 @@ func Shutdown(reason string) {
 
 func printUsageInfoAndExit() {
 	status := log.New(os.Stderr, "", 0)
-	status.Println("Usage: gut sync [--no-color] [--verbose] localpath [{ [user@]host:path | localpath }...]")
+	status.Println("")
+	status.Println("Usage: gut sync [option]... path [{ [user@]host:path | path }]...")
+	status.Println("")
+	status.Println("Options:")
+	status.Println("    --build-deps: Build gut-commands from git source instead of downloading tarball")
+	status.Println("    --no-color:   Disable ANSI colors")
+	status.Println("    --verbose:    Show all commands executed")
+	status.Println("")
 	status.Println("Examples:")
 	status.Println("   Sync folder with one remote: gut sync ~/stuff/ myname@remotehost.com:~/stuff/")
 	status.Println("  Sync folder with two remotes: gut sync stuff/ remotehost1.com:~/work/ bob@remotehost2.com:/tmp/sync")
 	status.Println("          Sync folders locally: gut sync ~/mywork /mnt/backup/mywork/")
 	status.Println("Just track changes, no syncing: gut sync ~/mywork")
+	status.Println("")
 	os.Exit(0)
 }
 
@@ -614,6 +624,9 @@ func main() {
 	if OptsCommon.Version {
 		status.Print("gut-sync version XXXXX")
 		os.Exit(0)
+	}
+	if OptsCommon.BuildDeps {
+		buildDependencies = true
 	}
 	bismuth.SetVerbose(OptsCommon.Verbose)
 
