@@ -18,7 +18,7 @@ by calling out to other utilities. It uses inotifywait (on Linux) or fswatch (on
 listen for file changes, and then orchestrates calls to gut-commands (such as gut-add or
 gut-fetch) on each system in order to keep all systems up-to-date.
 
-![Animated Gif showing git folders syncing over gut](https://www.tillberg.us/c/eb78b0141cc960b45e4651753a6486c00f4918be/gut-git.gif)
+![Animated Gif showing git folders syncing over gut](https://www.tillberg.us/c/b7d8d602e634931c50f957aeb58f9a2c5c4931545b96d6f276cb45d1eca434fe/gut-git.gif)
 
 Installation via curlbash
 =========================
@@ -26,7 +26,7 @@ Installation via curlbash
 If you have not a care for security, you could just cross your fingers and run this:
 
 ```sh
-bash -c 'S="a01fc8f1ed3f625681fac940bd6a4cc15eb3b86bdca1b0a2de9e63072b36ac1d";T="/tmp/gut.sh";set -e;wget -qO- https://www.tillberg.us/gut.sh>$T; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
+bash -c 'S="df959d3f7913ef9961cf469f7571e480c6f93e5768c44a04dc4f0ddcab7f925d";T="/tmp/gut.sh";set -e;wget -qO- "https://www.tillberg.us/c/$S/gut-1.0.0.sh">$T; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
 ```
 
 This will download and install the correct `gut` Go binary to `/usr/local/bin/gut`. It verifies
@@ -58,7 +58,7 @@ go get github.com/tillberg/gut
 The first time you run **gut-sync** on each host, it will build its dependencies and
 prompt you about extra dependencies that you need to download & install.
 
-![Animated Gif showing dependency detection and build](https://www.tillberg.us/c/7265e7d41db88a5f2a7b1d0acefea6b22eb7e4a3/gut-build.gif)
+![Animated Gif showing dependency detection and build](https://www.tillberg.us/c/2711f3d361ef0b528749461b0bda49da578841fbab2918d4530b3f75d8ce531c/gut-build.gif)
 
 Getting Started
 ===============
@@ -70,7 +70,7 @@ Let's say that you want to create a pair of linked folders, **~/work** locally a
 $ gut sync ~/work username@my.server.com:~/work
 ```
 
-![Animated Gif showing initial setup](https://www.tillberg.us/c/119d8cb31272eddb3984f9a7557a0ddce0b43580/gut-init.gif)
+![Animated Gif showing initial setup](https://www.tillberg.us/c/395daa91a84e82c77d5c0c874f4eb11ec58d2170f8424d34de19b155a6fc2a0c/gut-init.gif)
 
 This command sets up a gut repo locally in ~/work and clones it to your ~/work2
 directory on my.server.com, then starts watching the filesystem on both ends for
