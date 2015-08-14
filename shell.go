@@ -140,7 +140,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	status.Printf("@(dim:Starting gut-sync between) %s@(dim:.)\n", hostsStr)
 
 	for _, ctx := range allContexts {
-		_, err = EnsureBuild(local, ctx)
+		_, err = EnsureBuild(local, ctx, OptsCommon.BuildDeps)
 		if err != nil {
 			status.Bail(err)
 		}
@@ -625,9 +625,6 @@ func main() {
 		status.Print("gut-sync version XXXXX")
 		os.Exit(0)
 	}
-	if OptsCommon.BuildDeps {
-		buildDependencies = true
-	}
 	bismuth.SetVerbose(OptsCommon.Verbose)
 
 	signalChan := make(chan os.Signal, 1)
@@ -647,7 +644,7 @@ func main() {
 		if err != nil {
 			status.Bail(err)
 		}
-		didSomething, err := EnsureBuild(local, local)
+		didSomething, err := EnsureBuild(local, local, OptsCommon.BuildDeps)
 		if err != nil {
 			status.Bail(err)
 		}

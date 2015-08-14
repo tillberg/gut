@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"github.com/kballard/go-shellquote"
 	"io/ioutil"
 	"os"
@@ -244,11 +245,8 @@ func GutUnprepare(local *SyncContext, ctx *SyncContext) (err error) {
 	return nil
 }
 
-func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err error) {
+func BuildGut(local *SyncContext, ctx *SyncContext) (err error) {
 	status := ctx.Logger()
-	if ctx.HasGutInstalled() {
-		return false, nil
-	}
 	status.Printf("@(dim:Need to build gut on) %s@(dim:.)\n", ctx.NameAnsi())
 	err = ctx.EnsureGutFolders()
 	if err != nil {
@@ -282,5 +280,80 @@ func EnsureBuild(local *SyncContext, ctx *SyncContext) (didSomething bool, err e
 		status.Bail(err)
 	}
 	status.Printf(" @(dim: done.)\n")
-	return true, nil
+	status.Printf("@(green:Successfully built gut commands.)\n")
+	return nil
+}
+
+func InstallGut(local *SyncContext, ctx *SyncContext) (err error) {
+	status := ctx.Logger()
+	status.Printf("@(dim:Need to install gut on) %s@(dim:.)\n", ctx.NameAnsi())
+	err = ctx.EnsureGutFolders()
+	if err != nil {
+		status.Bail(err)
+	}
+	uname := strings.ToLower(ctx.Uname())
+	machine, err := ctx.Output("uname", "-m")
+	if err != nil {
+		status.Bail(err)
+	}
+	arch := "amd64"
+	if machine == "i386" {
+		arch = "386"
+	}
+	systemStr := uname + "-" + arch
+	tarballHash, ok := gutTarballHashes[systemStr]
+	if !ok {
+		status.Printf("Your system appears to be %q, which doesn't have a tarball available. Falling back to building from source.\n", systemStr)
+		return BuildGut(local, ctx)
+	}
+	filename := fmt.Sprintf("gut-%s-build-%s.tgz", GitVersion, systemStr)
+	url := fmt.Sprintf("https://www.tillberg.us/c/%s/%s", tarballHash, filename)
+	tarballPath := ctx.AbsPath(path.Join(GutPath, filename))
+	_, err = ctx.Output("rm", "-f", tarballPath) // Just in case it's already there
+	if err != nil {
+		status.Bail(err)
+	}
+	status.Printf("Downloading %s from www.tillberg.us...\n", filename)
+	retCode, err := ctx.QuoteCwd("wget", GutPath, "wget", "--progress=bar:force", url)
+	if err != nil {
+		status.Bail(err)
+	}
+	if retCode != 0 {
+		return errors.New(fmt.Sprintf("Failed to download %q", url))
+	}
+	status.Printf("Validating SHA256 hash of %s @(dim)(sha256 %s)@(r)\n", filename, tarballHash)
+	shasumStr, err := ctx.OutputCwd(GutPath, "shasum", "-a256", filename)
+	if err != nil {
+		status.Bail(err)
+	}
+	hashStr := strings.Split(shasumStr, " ")[0]
+	if hashStr != tarballHash {
+		return errors.New(fmt.Sprintf("Hash validation failed on %s. Got %q, but expected %q", filename, hashStr, tarballHash))
+	}
+	status.Printf("Validated %s. Extracting to %s.\n", filename, ctx.AbsPath(GutDistPath))
+	retCode, err = ctx.QuoteCwd("untar", GutPath, "tar", "xzf", filename)
+	if err != nil {
+		return err
+	}
+	if retCode != 0 {
+		return errors.New("Failed to untar gut-command tarball")
+	}
+	_, err = ctx.Output("rm", "-f", tarballPath)
+	if err != nil {
+		status.Bail(err)
+	}
+	status.Printf("@(green:Successfully installed gut commands.)\n")
+	return nil
+}
+
+func EnsureBuild(local *SyncContext, ctx *SyncContext, buildDeps bool) (didSomething bool, err error) {
+	if ctx.HasGutInstalled() {
+		return false, nil
+	}
+	if buildDeps {
+		err = BuildGut(local, ctx)
+		return true, err
+	}
+	err = InstallGut(local, ctx)
+	return true, err
 }

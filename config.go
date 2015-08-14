@@ -9,6 +9,12 @@ const MsysgitVersion = "Git-1.9.5-preview20150319"
 const InotifyWinRepoUrl = "https://github.com/thekid/inotify-win.git"
 const InotifyWinVersion = "9b547cfde0f546df8abeebf47ec36f36d7bd91ef"
 
+var gutTarballHashes = map[string]string{
+	"darwin-amd64": "2cbf485213af3061a3d5ce27211295ae804d535ed4854f9da6d57418bcc39424",
+	"linux-386":    "b3ee92d6147c20d154843739c5a94fe28822f835f99d3ea20821d79ce107a313",
+	"linux-amd64":  "d437b2008d313974b4b5a4293bcf93b8b681e65919c74099e6016975387d7eae",
+}
+
 const GutPath = "~/.guts"
 const GutSrcPath = GutPath + "/gut-src"
 const GutSrcTmpPath = GutPath + "/gut-src-tmp"
@@ -22,8 +28,6 @@ const GutDaemonPath = GutPath + "/repos"
 
 const MinRandomPort = 34000
 const MaxRandomPort = 34999
-
-var buildDependencies = false
 
 // Ignore files that are probably transient or machine-specific by default.
 // You can add/remove additional globs to both the root .gutignore and to
