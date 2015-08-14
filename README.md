@@ -26,7 +26,7 @@ Installation via curlbash
 If you have not a care for security, you could just cross your fingers and run this:
 
 ```sh
-bash -c 'S="df959d3f7913ef9961cf469f7571e480c6f93e5768c44a04dc4f0ddcab7f925d";T="/tmp/gut.sh";set -e;wget -qO- "https://www.tillberg.us/c/$S/gut-1.0.0.sh">$T; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
+bash -c 'S="13dc9922a2cdf564ba3068f834b0c4a29b07485abba1776fc7001204ff34ebf3";T="/tmp/gut.sh";set -e;wget -qO- "https://www.tillberg.us/c/$S/gut-1.0.0.sh">$T; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
 ```
 
 This will download and install the correct `gut` Go binary to `/usr/local/bin/gut`. It verifies
