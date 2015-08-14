@@ -25,10 +25,14 @@ Installation via curlbash
 
 If you have not a care for security, you could just cross your fingers and run this:
 
-**TODO**
+```sh
+bash -c 'S="a01fc8f1ed3f625681fac940bd6a4cc15eb3b86bdca1b0a2de9e63072b36ac1d";T="/tmp/gut.sh";set -e;wget -qO- https://www.tillberg.us/gut.sh>$T; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
+```
 
-This will download and install the correct `gut` Go binary into `/usr/local/bin`,
-and the pre-built `gut-*` C binaries and libraries into `$HOME/.guts`.
+This will download and install the correct `gut` Go binary to `/usr/local/bin/gut`. It verifies
+the SHA256 sum of the script it downloads, and then in turn in the SHA256 sum of the binary it
+subsequently downloads & installs, but it doesn't verify the integrity of the author.
+But *shrug*, right?
 
 Installation from source
 ========================
