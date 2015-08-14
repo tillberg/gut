@@ -622,7 +622,7 @@ func main() {
 		log.DisableColor()
 	}
 	if OptsCommon.Version {
-		status.Print("gut-sync version XXXXX")
+		status.Printf("gut-sync %s\n", GutVersion)
 		os.Exit(0)
 	}
 	bismuth.SetVerbose(OptsCommon.Verbose)
