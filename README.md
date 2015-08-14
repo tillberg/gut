@@ -159,6 +159,12 @@ Invalid command: 'gut-receive-pack 'tillberg/test.git''
 fatal: Could not read from remote repository.
 ```
 
+License
+=======
+
+[ISC License][ISC License]
+
 [Go Install]: https://golang.org/doc/install
 [Go Setup]: https://golang.org/doc/code.html
 [crypto/ssh]: https://godoc.org/golang.org/x/crypto/ssh
+[ISC License]: https://github.com/tillberg/gut/blob/master/LICENSE
