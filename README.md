@@ -19,11 +19,22 @@ on each system in order to keep all systems up-to-date.
 
 ![Animated Gif showing git folders syncing over gut](https://www.tillberg.us/c/eb78b0141cc960b45e4651753a6486c00f4918be/gut-git.gif)
 
+Installation via curlbash
+=========================
+
+If you have not a care for security, you could just cross your fingers and run this:
+
+**TODO**
+
+This will download and install the correct `gut` Go binary into `/usr/local/bin`,
+and the pre-built `gut-*` C binaries and libraries into `$HOME/.guts`.
+
 Installation from source
 ========================
 
-You'll need the go compiler installed (v1.4 or later) first. The [Go install documentation][Go Install]
-is a good place to start if you haven't set it up already.
+To install from source, first you'll need the go compiler installed (v1.4 or later).
+The [Go install documentation][Go Install] is a good place to start if you haven't set
+up Go already.
 
 After you have Go installed, you also need to [set your GOPATH][Go Setup]. You probably just want to
 use the defaults: (add these to your `.profile`/`.bash_profile` to persist to new shell sessions)
@@ -33,26 +44,19 @@ export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 ```
 
-To install **gut** to $GOPATH/bin, just run:
+With that all configured, to install **gut** into $GOPATH/bin, run:
 
 ```sh
 go get github.com/tillberg/gut
 ```
 
-Installation via curlbash
-=========================
-
-If you have not a care for security, you could just cross your fingers and run this:
-
-**TODO**
-
-Getting Started
-===============
-
 The first time you run **gut-sync** on each host, it will build its dependencies and
 prompt you about extra dependencies that you need to download & install.
 
 ![Animated Gif showing dependency detection and build](https://www.tillberg.us/c/7265e7d41db88a5f2a7b1d0acefea6b22eb7e4a3/gut-build.gif)
+
+Getting Started
+===============
 
 Let's say that you want to create a pair of linked folders, **~/work** locally and
 **~/work2** on **my.server.com**. Fire up a terminal and run something like this:
