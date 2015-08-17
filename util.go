@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
+	"io"
 	"math/rand"
 	"path/filepath"
 	"strings"
@@ -215,7 +216,15 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 				// status.Printf("relPath: %q from %q\n", relPath, watchedRoot)
 				fileEventCallback(relPath)
 			})
-			pid, retCodeChan, err := ctx.QuoteDaemonCwdPipeOut(watchType, watchedRoot, buf, args...)
+			chanStdout := make(chan io.Reader)
+			go func() {
+				stdout := <-chanStdout
+				_, err := io.Copy(buf, stdout)
+				if err != nil {
+					status.Printf("Error copying from stdout to buf: %s\n", err)
+				}
+			}()
+			pid, retCodeChan, err := ctx.QuoteDaemonCwdPipeOut(watchType, watchedRoot, chanStdout, args...)
 			if err != nil {
 				if isFirstTime {
 					firstTimeChan <- err
@@ -233,7 +242,6 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 				status.Printf("Error saving PID for %s: %v\n", watchType, err)
 				continue
 			}
-
 			if isFirstTime {
 				firstTimeChan <- err
 				if err != nil {
