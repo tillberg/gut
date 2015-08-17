@@ -123,6 +123,33 @@ I've done some implementation work for Windows (and had a fully-functioning Pyth
 before porting to Go -- it's definitely feasible), and so if you're interested in either using that
 or helping to implement, open up an issue for discussion and/or tag https://github.com/tillberg/gut/issues/4.
 
+Comparison with Similar Tools
+=============================
+
+There are some really awesome (perhaps more awesome for your use case) file sync tools out
+there. Here are the big differientiators (and may count as plusses or minuses for you) for
+**gut-sync** as compared to others:
+
+- Gut uses a renamed version of git under the hood.
+  - If you already know git, or are an expert using git, then you can use that experience to
+    configure, tweak, and explore/modify the gut-sync history.
+  - If you are not familiar at all with git, you may prefer another tool that exposes
+    history/versions in a more user-friendly way.
+  - If you want to sync a lot of large files, or large rapidly-changing files, the overhead of
+    using git (which never deletes history) may be too expensive.
+- Gut communicates and deploys itself via SSH.
+  - If you already use SSH everywhere, then this means deploying and using **gut-sync** will be easy.
+  - If you don't use SSH, then another tool may be a better fit.
+
+Here's a short list of some other tools you might want to check out:
+
+- [Syncthing][Syncthing]: Really fantastic cross-platform open-source (MPLv2) sync daemon built around
+  its own synchronization protocol. Runs a web GUI locally for easy setup.
+- [Unison][Unison], [SparkleShare][SparkleShare]: Similar, open-source yet somewhat-abandoned sync tools.
+- Finally, there are [Dropbox][Dropbox], [Google Drive][Google Drive], and many other similar
+  hosted file sync services. These services store and transmit through a third party, which may
+  incur latency and monetary cost in addition to reduced privacy/security.
+
 Gut is like Git, but with more U and less I
 ===========================================
 
@@ -172,3 +199,9 @@ License
 [Go Setup]: https://golang.org/doc/code.html
 [crypto/ssh]: https://godoc.org/golang.org/x/crypto/ssh
 [ISC License]: https://github.com/tillberg/gut/blob/master/LICENSE
+
+[Syncthing]: https://syncthing.net/
+[Unison]: http://www.cis.upenn.edu/~bcpierce/unison/
+[SparkleShare]: http://sparkleshare.org/
+[Dropbox]: https://www.dropbox.com/
+[Google Drive]: https://www.google.com/drive/
