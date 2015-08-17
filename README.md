@@ -18,7 +18,35 @@ by calling out to other utilities. It uses inotifywait (on Linux) or fswatch (on
 listen for file changes, and then orchestrates calls to gut-commands (such as gut-add or
 gut-fetch) on each system in order to keep all systems up-to-date.
 
+**gut-sync** has been tested on and between **OSX** and **Ubuntu**.
+
 ![Animated Gif showing git folders syncing over gut](https://www.tillberg.us/c/b7d8d602e634931c50f957aeb58f9a2c5c4931545b96d6f276cb45d1eca434fe/gut-git.gif)
+
+### Comparison with Similar Tools
+
+There are some other really awesome (perhaps more awesome for your use case) file sync tools out
+there. Here are the big differientiators (and may count as plusses or minuses for you) for
+**gut-sync** as compared to others:
+
+- **gut-sync uses git under the hood**. (*well, "gut", a [machine-renamed][machine-renamed] version of git*)
+  - If you already know git, or are an expert using git, then you can use that experience to
+    configure, tweak, and explore/modify the gut-sync history.
+  - If you are not familiar at all with git, you may prefer another tool that exposes
+    history/versions in a more user-friendly way.
+  - If you want to sync a lot of large files, or large rapidly-changing files, the overhead of
+    using git (which never deletes history) may be too expensive.
+- **gut-sync communicates and deploys itself via SSH**.
+  - If you already use SSH everywhere, then this means deploying and using **gut-sync** will be easy.
+  - If you don't use SSH, then another tool may be a better fit.
+
+Here's a short list of some other tools you might want to check out:
+
+- [Syncthing][Syncthing]: Really fantastic cross-platform open-source (MPLv2) sync daemon built around
+  its own synchronization protocol. Runs a web GUI locally for easy setup.
+- [Unison][Unison], [SparkleShare][SparkleShare]: Similar, open-source yet somewhat-abandoned sync tools.
+- Finally, there are [Dropbox][Dropbox], [Google Drive][Google Drive], and many other similar
+  hosted file sync services. These services store and transmit through a third party, which may
+  incur latency and monetary cost in addition to reduced privacy/security.
 
 Installation via curlbash
 =========================
@@ -98,15 +126,15 @@ $ gut log --stat
 # ... <- You should see *all* the file changes recorded here, including inside ~/work2/gut/.git/
 ```
 
-Configuration
-=============
+Configuration et al.
+====================
 
-### Excluding files and folders
+#### Excluding files and folders
 
-To exclude files from gut-sync, use **.gutignore** files just as you'd use **.gitignore** over in
+To exclude files from **gut-sync**, use **.gutignore** files just as you'd use **.gitignore** over in
 git-world.
 
-### SSH Authentication
+#### SSH Authentication
 
 **gut-sync** connects to the ssh agent specified by `SSH_AUTH_SOCK` and uses the experimental
 [golang.org/x/crypto/ssh][crypto/ssh] SSH client. This does not, for example, read any settings
@@ -115,7 +143,7 @@ such as Username settings and Hostname aliases. For many, this will work just fi
 on all of my systems). If it doesn't work for you, though, please create issues and/or PRs with
 as much detail as you can provide about where it breaks down (thanks!).
 
-### "Please increase the amount of inotify watches allowed per user"
+#### "Please increase the amount of inotify watches allowed per user"
 
 If you see this message, it means you've run out of inotify watch slots. You can increase this limit
 temporarily by writing to `/proc/sys/fs/inotify/max_user_watches`, or permanently by modifying the
@@ -133,48 +161,18 @@ Note that inotifywait/fswatch don't exclude `.gutignore`d paths from being wired
 notifications, which would be a great way to cut down on noise and watch-slot consumption from large
 directory hierarchies which we're not synchronizing, anyway.
 
-Supported OSes
-==============
-
-**gut-sync** has been tested on and between **OSX** and **Ubuntu**.
+#### Windows support?
 
 I've done some implementation work for Windows (and had a fully-functioning Python implementation
 before porting to Go -- it's definitely feasible), and so if you're interested in either using that
 or helping to implement, open up an issue for discussion and/or tag https://github.com/tillberg/gut/issues/4.
-
-Comparison with Similar Tools
-=============================
-
-There are some other really awesome (perhaps more awesome for your use case) file sync tools out
-there. Here are the big differientiators (and may count as plusses or minuses for you) for
-**gut-sync** as compared to others:
-
-- Gut uses a renamed version of git under the hood.
-  - If you already know git, or are an expert using git, then you can use that experience to
-    configure, tweak, and explore/modify the gut-sync history.
-  - If you are not familiar at all with git, you may prefer another tool that exposes
-    history/versions in a more user-friendly way.
-  - If you want to sync a lot of large files, or large rapidly-changing files, the overhead of
-    using git (which never deletes history) may be too expensive.
-- Gut communicates and deploys itself via SSH.
-  - If you already use SSH everywhere, then this means deploying and using **gut-sync** will be easy.
-  - If you don't use SSH, then another tool may be a better fit.
-
-Here's a short list of some other tools you might want to check out:
-
-- [Syncthing][Syncthing]: Really fantastic cross-platform open-source (MPLv2) sync daemon built around
-  its own synchronization protocol. Runs a web GUI locally for easy setup.
-- [Unison][Unison], [SparkleShare][SparkleShare]: Similar, open-source yet somewhat-abandoned sync tools.
-- Finally, there are [Dropbox][Dropbox], [Google Drive][Google Drive], and many other similar
-  hosted file sync services. These services store and transmit through a third party, which may
-  incur latency and monetary cost in addition to reduced privacy/security.
 
 Gut is like Git, but with more U and less I
 ===========================================
 
 The reason it's necessary to use a modified version of git, and not git itself,
 is that *stock git will refuse to traverse into .git folders*, which is critical
-to using gut-sync to synchronize folders containing git repos. Other than the
+to using **gut-sync** to synchronize folders containing git repos. Other than the
 name-change, though, gut is the same as git.
 
 You can use gut just like you'd use git, if you want:
@@ -214,6 +212,7 @@ License
 
 [ISC License][ISC License]
 
+[machine-renamed]: https://github.com/tillberg/gut/blob/37cbc3748d674c46b2481220afdf34dd0a4b8e34/gut_build.go#L36-L101
 [Go Install]: https://golang.org/doc/install
 [Go Setup]: https://golang.org/doc/code.html
 [crypto/ssh]: https://godoc.org/golang.org/x/crypto/ssh
