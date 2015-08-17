@@ -1,5 +1,5 @@
-gut (gut-sync)
-==============
+gut-sync
+========
 
 What would happen if you took git, sed, rsync, and inotify, and you mushed and kneaded
 them together until smooth? You'd get **gut-sync**: *real-time bi-directional folder synchronization*.
@@ -49,7 +49,7 @@ export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 ```
 
-With that all configured, to install **gut** into $GOPATH/bin, run:
+With that all configured, to install **gut-sync** into $GOPATH/bin, run:
 
 ```sh
 go get github.com/tillberg/gut
@@ -101,11 +101,12 @@ $ gut log --stat
 Configuration
 =============
 
+### Excluding files and folders
+
 To exclude files from gut-sync, use **.gutignore** files just as you'd use **.gitignore** over in
 git-world.
 
-SSH Authentication Issues
-=========================
+### SSH Authentication
 
 **gut-sync** connects to the ssh agent specified by `SSH_AUTH_SOCK` and uses the experimental
 [golang.org/x/crypto/ssh][crypto/ssh] SSH client. This does not, for example, read any settings
@@ -114,10 +115,28 @@ such as Username settings and Hostname aliases. For many, this will work just fi
 on all of my systems). If it doesn't work for you, though, please create issues and/or PRs with
 as much detail as you can provide about where it breaks down (thanks!).
 
+### "Please increase the amount of inotify watches allowed per user"
+
+If you see this message, it means you've run out of inotify watch slots. You can increase this limit
+temporarily by writing to `/proc/sys/fs/inotify/max_user_watches`, or permanently by modifying the
+`fs.inotify.max_user_watches` sysctl property. See
+[this great page about inotify max_user_watches][guard/listen inotify reference] on the guard/listen
+project for tips and additional details.
+
+Alternately, you could reduce the total number of directories inside the folder you're synchronizing.
+In addition to removing folders you don't wish to sync, some options include running `git gc` inside
+less-used repositories, removing unused `node_modules` dependencies (which tend to span a large number
+of directories), and more generally scanning the output of `find /path/to/gut/repo -type d` for cases
+where a large number of directories is being used.
+
+Note that inotifywait/fswatch don't exclude `.gutignore`d paths from being wired up for change
+notifications, which would be a great way to cut down on noise and watch-slot consumption from large
+directory hierarchies which we're not synchronizing, anyway.
+
 Supported OSes
 ==============
 
-**gut** has been tested on **OSX** and **Ubuntu** as both the local and remote hosts.
+**gut-sync** has been tested on and between **OSX** and **Ubuntu**.
 
 I've done some implementation work for Windows (and had a fully-functioning Python implementation
 before porting to Go -- it's definitely feasible), and so if you're interested in either using that
@@ -126,7 +145,7 @@ or helping to implement, open up an issue for discussion and/or tag https://gith
 Comparison with Similar Tools
 =============================
 
-There are some really awesome (perhaps more awesome for your use case) file sync tools out
+There are some other really awesome (perhaps more awesome for your use case) file sync tools out
 there. Here are the big differientiators (and may count as plusses or minuses for you) for
 **gut-sync** as compared to others:
 
@@ -205,3 +224,4 @@ License
 [SparkleShare]: http://sparkleshare.org/
 [Dropbox]: https://www.dropbox.com/
 [Google Drive]: https://www.google.com/drive/
+[guard/listen inotify reference]: https://github.com/guard/listen/wiki/Increasing-the-amount-of-inotify-watchers
