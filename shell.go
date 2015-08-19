@@ -3,13 +3,13 @@ package main
 import (
 	"fmt"
 	"github.com/jessevdk/go-flags"
+	"github.com/mitchellh/go-homedir"
 	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
 	"io"
 	"net"
 	"os"
 	"os/signal"
-	"os/user"
 	"path"
 	"strings"
 	"sync"
@@ -603,11 +603,11 @@ func main() {
 				args = args[:1]
 			}
 		}
-		usr, err := user.Current()
+		homeDir, err := homedir.Dir()
 		if err != nil {
 			log.Bail(err)
 		}
-		var gutExe = path.Join(usr.HomeDir, GutExePath[2:])
+		var gutExe = path.Join(homeDir, GutExePath[2:])
 		syscall.Exec(gutExe, append([]string{gutExe}, args...), os.Environ())
 		fmt.Printf("Failed to exec %s", gutExe)
 		os.Exit(1)
