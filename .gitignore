@@ -25,6 +25,6 @@ _testmain.go
 *.test
 *.prof
 
-/gut
-/.gutignore
+.gutignore
+
 /dist
