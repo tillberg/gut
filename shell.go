@@ -19,9 +19,9 @@ import (
 
 var OptsCommon struct {
 	Verbose   bool `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Version   bool `long:"version"`
-	NoColor   bool `long:"no-color"`
-	BuildDeps bool `long:"build-deps"`
+	Version   bool `long:"version" description:"Print gut-sync version"`
+	NoColor   bool `long:"no-color" description:"Disable ANSI colors"`
+	BuildDeps bool `long:"build-deps" description:"Build gut-command dependencies from source"`
 }
 
 var OptsSync struct {
