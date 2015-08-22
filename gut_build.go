@@ -213,8 +213,18 @@ func (ctx *SyncContext) GutBuild(buildPath string) (err error) {
 			Shutdown(status.Colorify("@(error:`configure` failed during gut build.)"))
 		}
 	}
-	parallelism := ctx.GetNumCores()
-	status.Printf("@(dim:Building gut using up to) %s @(dim:processes...)\n", parallelism)
+	parallelism := "1"
+	if OptsCommon.BuildParallel {
+		parallelism = ctx.GetNumCores()
+	}
+	plural := "es"
+	if parallelism == "1" {
+		plural = ""
+	}
+	status.Printf("@(dim:Building gut using up to) %s @(dim:process%s...)\n", parallelism, plural)
+	if !OptsCommon.BuildParallel {
+		status.Printf("@(dim:(Use) --build-parallel @(dim)to enable parallel builds.)@(r)\n")
+	}
 	retCode, err := doMake("build", installPrefix, "-j", parallelism)
 	if err != nil || retCode != 0 {
 		Shutdown(status.Colorify("@(error:`make` failed during gut build.)"))

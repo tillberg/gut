@@ -18,10 +18,11 @@ import (
 )
 
 var OptsCommon struct {
-	Verbose   bool `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Version   bool `long:"version" description:"Print gut-sync version"`
-	NoColor   bool `long:"no-color" description:"Disable ANSI colors"`
-	BuildDeps bool `long:"build-deps" description:"Build gut-command dependencies from source"`
+	Verbose       bool `short:"v" long:"verbose" description:"Show verbose debug information"`
+	Version       bool `long:"version" description:"Print gut-sync version"`
+	NoColor       bool `long:"no-color" description:"Disable ANSI colors"`
+	BuildDeps     bool `long:"build-deps" description:"Build gut-command dependencies from source"`
+	BuildParallel bool `long:"build-parallel" description:"Build gut-commands in parallel via make -j {num_cores}"`
 }
 
 var OptsSync struct {
@@ -560,9 +561,10 @@ func printUsageInfoAndExit() {
 	status.Println("Usage: gut sync [option]... path [{ [user@]host:path | path }]...")
 	status.Println("")
 	status.Println("Options:")
+	status.Println("      --no-color: Disable ANSI colors")
+	status.Println("       --verbose: Show all commands executed")
 	status.Println("    --build-deps: Build gut-commands from git source instead of downloading tarball")
-	status.Println("    --no-color:   Disable ANSI colors")
-	status.Println("    --verbose:    Show all commands executed")
+	status.Println("--build-parallel: Build gut-commands in parallel via make -j {num_cores}")
 	status.Println("")
 	status.Println("Examples:")
 	status.Println("   Sync folder with one remote: gut sync ~/stuff/ myname@remotehost.com:~/stuff/")
