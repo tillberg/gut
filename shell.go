@@ -551,7 +551,7 @@ func Shutdown(reason string) {
 		}
 	}
 	status.Printf("Exiting.")
-	fmt.Println()
+	os.Stderr.WriteString("\n")
 	os.Exit(1)
 }
 
@@ -659,12 +659,16 @@ func main() {
 			printUsageInfoAndExit()
 		}
 
-		ready := make(chan bool)
+		ready := make(chan error)
 
 		local := NewSyncContext()
 		err = local.ParseSyncPath(OptsSync.Positional.LocalPath)
 		if err != nil {
 			status.Bail(err)
+		}
+		if len(remoteArgs) > 0 && os.Getenv("SSH_AUTH_SOCK") == "" {
+			log.Printf("@(error:SSH_AUTH_SOCK is not set in environment. Start up an ssh agent first before running gut-sync.)\n")
+			Shutdown("")
 		}
 		go func() {
 			err = local.Connect()
@@ -677,7 +681,7 @@ func main() {
 			}
 			local.KillAllViaPidfiles()
 			local.SaveDaemonPid("gut", os.Getpid())
-			ready <- true
+			ready <- nil
 		}()
 
 		remotes := []*SyncContext{}
@@ -691,14 +695,15 @@ func main() {
 			go func(_remote *SyncContext) {
 				err = _remote.Connect()
 				if err != nil {
-					status.Bail(err)
+					status.Printf("@(error:Failed to connect to %s: %s)\n", remote.Hostname(), err)
+					Shutdown("")
 				}
 				_remote.KillAllViaPidfiles()
 				err = _remote.CheckRemoteDeps()
 				if err != nil {
 					status.Bail(err)
 				}
-				ready <- true
+				ready <- nil
 			}(remote)
 		}
 
