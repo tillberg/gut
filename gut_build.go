@@ -296,9 +296,9 @@ func InstallGut(local *SyncContext, ctx *SyncContext) (err error) {
 	if err != nil {
 		status.Bail(err)
 	}
-	arch := "amd64"
-	if machine == "i386" {
-		arch = "386"
+	arch := "386"
+	if machine == "x86_64" {
+		arch = "amd64"
 	}
 	systemStr := uname + "-" + arch
 	tarballHash, ok := gutTarballHashes[systemStr]

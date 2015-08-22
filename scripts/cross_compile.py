@@ -37,7 +37,7 @@ for system, arch in targets:
     gut_version_str = 'gut-%s-%s-%s' % (gut_version, system, arch)
     print 'Building %s' % (gut_version_str,)
     cmd('GOOS=%s GOARCH=%s go build' % (system, arch), cwd=gut_src_path)
-    cmd('gzip gut', cwd=gut_src_path)
+    cmd('gzip -9 gut', cwd=gut_src_path)
     cmd('mv gut.gz "%s/%s.gz"' % (dest_path, gut_version_str))
 
 curlbash_src_path = os.path.join(gut_src_path, "scripts/curlbash.base.sh")

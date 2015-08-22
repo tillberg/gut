@@ -3,10 +3,10 @@ set -e
 {
 OS=$(uname -s | awk '{print tolower($0)}')
 _ARCH=$(uname -m)
-if [ "$_ARCH" = "i386" ]; then
-    ARCH="386"
-else
+if [ "$_ARCH" = "x86_64" ]; then
     ARCH="amd64"
+else
+    ARCH="386"
 fi
 GUT_EXE="gut-__GUTVERSION__-$OS-$ARCH"
 GUT_BUILD_TGZ="gut-v2.5.0-build-$OS-$ARCH.tgz"
