@@ -12,7 +12,7 @@ import (
 func (ctx *SyncContext) tryRun(args ...string) bool {
 	_, _, retCode, err := ctx.Run(args...)
 	if err != nil {
-		ctx.Logger().Bail(err)
+		return false
 	}
 	return retCode == 0
 }
