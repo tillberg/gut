@@ -138,6 +138,7 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 	logger.Printf("@(dim:Attempting to install) %s on %s@(dim:...)\n", depsStrLong, ctx.NameAnsi())
 	var retCode int
 	for _, cmd := range strings.Split(installCmd, " && ") {
+		ctx.Logger().Printf("@(dim:$) %s\n", cmd)
 		retCode, err = ctx.ShellInteractive(cmd)
 		if err != nil {
 			logger.Bail(err)
