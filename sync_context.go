@@ -4,12 +4,13 @@ import (
 	"crypto/md5"
 	"errors"
 	"fmt"
-	"github.com/tillberg/bismuth"
 	"os/user"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/tillberg/bismuth"
 )
 
 type SyncContext struct {
@@ -163,8 +164,13 @@ func (ctx *SyncContext) GutQuote(suffix string, args ...string) (int, error) {
 	return ctx.QuoteCwd(suffix, ctx.AbsSyncPath(), ctx.GutArgs(args...)...)
 }
 
+func (ctx *SyncContext) getPidfileScope() string {
+	return strings.Replace(ctx.WatchedRoot(), "/", "_", -1)
+}
+
 func (ctx *SyncContext) getPidfilePath(name string) string {
-	return ctx.AbsPath(path.Join(PidfilesPath, name+".pid"))
+	scopedName := name + "-" + ctx.getPidfileScope()
+	return ctx.AbsPath(path.Join(PidfilesPath, scopedName+".pid"))
 }
 
 func (ctx *SyncContext) SaveDaemonPid(name string, pid int) (err error) {
@@ -215,16 +221,25 @@ func (ctx *SyncContext) KillAllViaPidfiles() {
 		logger.Printf("Encountered error while listing pidfiles: %v\n", err)
 		return
 	}
+	pidfileScope := ctx.getPidfileScope()
 	for _, filename := range files {
-		parts := strings.Split(filename, ".")
-		if len(parts) != 2 || parts[1] != "pid" {
+		if !strings.HasSuffix(filename, ".pid") {
 			continue
 		}
-		name := parts[0]
+		scopedName := filename[:len(filename)-len(".pid")]
+		parts := strings.SplitN(scopedName, "-", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		name, scope := parts[0], parts[1]
 		if name == "gut" && ctx.IsLocal() {
 			// Only kill gut if it's on a different host
 			continue
 		}
+		if scope == "" || scope != pidfileScope {
+			continue
+		}
+		logger.Printf("Killing process via pidfile %s\n", scopedName)
 		err := ctx.KillViaPidfile(name)
 		if err != nil {
 			logger.Printf("Error killing %s process via pidfile: %v\n", name, err)

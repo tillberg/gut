@@ -25,6 +25,7 @@ func (ctx *SyncContext) GutDaemon(repoName string, bindPort int) (err error) {
 	if err != nil {
 		return err
 	}
+
 	if exists {
 		err = ctx.DeleteLink(symlinkPath)
 		if err != nil {

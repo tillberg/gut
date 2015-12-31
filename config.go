@@ -36,7 +36,7 @@ const MaxRandomPort = 34999
 const DefaultGutignore = ("# Added by `gut sync` during repo init:" + `
 *.lock
 .#*
-
+/.stversions
 # Various compiled resources:
 *.pyc
 *.o

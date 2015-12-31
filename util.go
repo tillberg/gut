@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/tillberg/ansi-log"
-	"github.com/tillberg/bismuth"
 	"io"
 	"math/rand"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tillberg/ansi-log"
+	"github.com/tillberg/bismuth"
 )
 
 func WindowsPathToMingwPath(p string) string {
@@ -161,6 +162,20 @@ func NewLineBuf(lineCallback func([]byte)) *LineBuf {
 	return &LineBuf{lineCallback, []byte{}}
 }
 
+func (ctx *SyncContext) WatchedRoot() string {
+	var watchedRoot string
+	var err error
+	if ctx.IsWindows() {
+		watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "cmd", "/c", "cd ,")
+	} else {
+		watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "pwd", "-P")
+	}
+	if err != nil {
+		alog.Bail(err)
+	}
+	return watchedRoot
+}
+
 func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 	watchType := ctx.GetCmd("inotifywait", "fswatch")
 	status := ctx.NewLogger(watchType)
@@ -176,17 +191,7 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 			Shutdown("missing inotifywait")
 		}
 	}
-	watchedRoot := ""
-	var err error
-	if ctx.IsWindows() {
-		watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "cmd", "/c", "cd ,")
-	} else {
-		watchedRoot, err = ctx.OutputCwd(ctx.AbsSyncPath(), "pwd", "-P")
-	}
-	if err != nil {
-		status.Bail(err)
-	}
-
+	watchedRoot := ctx.WatchedRoot()
 	isFirstTime := true
 	firstTimeChan := make(chan error)
 	go func() {
@@ -258,7 +263,7 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 			}
 		}
 	}()
-	err = <-firstTimeChan
+	err := <-firstTimeChan
 	if err != nil {
 		status.Bail(err)
 	}
@@ -332,8 +337,8 @@ func JoinWithAndAndCommas(strs ...string) string {
 	var buf bytes.Buffer
 	buf.WriteString(strs[0])
 	if len(strs) > 1 {
-		commaStr := log.Colorify("@(dim:, )")
-		andStr := log.Colorify("@(dim:and )")
+		commaStr := alog.Colorify("@(dim:, )")
+		andStr := alog.Colorify("@(dim:and )")
 		strs = strs[1:]
 		for i, str := range strs {
 			if len(strs) >= 2 {

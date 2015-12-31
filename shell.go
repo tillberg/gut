@@ -2,10 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/jessevdk/go-flags"
-	"github.com/mitchellh/go-homedir"
-	"github.com/tillberg/ansi-log"
-	"github.com/tillberg/bismuth"
 	"io"
 	"net"
 	"os"
@@ -15,6 +11,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/jessevdk/go-flags"
+	"github.com/mitchellh/go-homedir"
+	log "github.com/tillberg/ansi-log"
+	"github.com/tillberg/autorestart"
+	"github.com/tillberg/bismuth"
 )
 
 var OptsCommon struct {
@@ -376,7 +378,9 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 					paths = append(paths, path)
 				}
 				_, changedThisIgnore := changedIgnore[taskCtx]
+				// log.Printf("Starting commitScoped on %s\n", taskCtx.NameAnsi())
 				changed, err := commitScoped(taskCtx, paths, changedThisIgnore)
+				// log.Printf("Finished commitScoped on %s\n", taskCtx.NameAnsi())
 				if err != nil {
 					status.Printf("@(error:Commit failed on) %s@(error:: %v)\n", taskCtx.NameAnsi(), err)
 					changedCtxChan <- nil
@@ -406,12 +410,16 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 		// XXX if remote has a previous change (i.e. from when it was the local), we don't necessarily pick up that change here.
 		for _, ctx := range changedCtxs {
 			if ctx != local {
+				// log.Printf("Starting GutPush on %s\n", ctx.NameAnsi())
 				err = ctx.GutPush()
+				// log.Printf("Finished GutPush on %s\n", ctx.NameAnsi())
 				if err != nil {
 					status.Printf("@(error:Failed to push changes from) %s @(error:to local: %v)\n", ctx.NameAnsi(), err)
 					continue
 				}
+				// log.Printf("Starting GutMerge on %s\n", ctx.NameAnsi())
 				err = local.GutMerge(ctx.BranchName())
+				// log.Printf("Finished GutMerge on %s\n", ctx.NameAnsi())
 				if err != nil {
 					status.Printf("@(error:Failed to merge) %s @(error:into) master@(error:: %v)\n", ctx.BranchName(), err)
 				}
@@ -438,29 +446,38 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 					done <- nil
 					return
 				}
+				// log.Printf("Starting GutRevParseHead on %s\n", taskCtx.NameAnsi())
 				myCommit, err := taskCtx.GutRevParseHead()
+				// log.Printf("Finished GutRevParseHead on %s\n", taskCtx.NameAnsi())
 				if err != nil {
 					done <- err
 					return
 				}
 				localMasterCommit := <-masterCommitChan
 				if localMasterCommit != "" && myCommit != localMasterCommit {
+					// log.Printf("Starting GutPull on %s\n", taskCtx.NameAnsi())
 					err = taskCtx.GutPull()
+					// log.Printf("Finished GutPull on %s\n", taskCtx.NameAnsi())
 				}
+				// log.Printf("Finished third phase on %s\n", taskCtx.NameAnsi())
 				done <- err
 			}(ctx)
 		}
 		for _, ctx := range remotes {
-			err = <-done
-			if err == NeedsCommitError {
-				status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
-				go func() {
-					eventChan <- FileEvent{ctx, forceFullSyncCheckString}
-				}()
-				err = nil
-			}
-			if err != nil {
-				status.Printf("@(error:Failed to pull changes to) %s@(error:: %v)\n", ctx.NameAnsi(), err)
+			select {
+			case err = <-done:
+				if err == NeedsCommitError {
+					status.Printf("@(dim:Need to commit on) %s @(dim:before it can pull.)\n", ctx.NameAnsi())
+					go func() {
+						eventChan <- FileEvent{ctx, forceFullSyncCheckString}
+					}()
+					err = nil
+				}
+				if err != nil {
+					status.Printf("@(error:Failed to pull changes to) %s@(error:: %v)\n", ctx.NameAnsi(), err)
+				}
+			case <-time.After(60 * time.Second):
+				status.Printf("@(warn:Timed out while waiting for a remote to finish syncing.)\n")
 			}
 		}
 	}
@@ -613,6 +630,8 @@ func main() {
 		fmt.Printf("Failed to exec %s", gutExe)
 		os.Exit(1)
 	}
+	autorestart.CleanUpChildZombiesQuietly()
+	go autorestart.RestartOnChange()
 	status := log.New(os.Stderr, "", 0)
 	args = args[1:]
 	var argsRemaining, err = flags.ParseArgs(&OptsCommon, args)

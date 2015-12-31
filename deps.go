@@ -9,6 +9,15 @@ import (
 	"sync"
 )
 
+// Arch Linux:
+// - Obviously, needs to use pacman instead of apt-get
+// - Some sort of libcrypto: no version information available thing
+// - Needs wget
+// - Had weird issues with gut precompiled binaries:
+//   - "cannot run rev-list: No such file or directory"
+//   - "cannot run unpack-objects: No such file or directory"
+//   - "fetch-pack: unable to fork off unpack-objects"
+// - `gut build --build-deps` worked, though.
 func (ctx *SyncContext) tryRun(args ...string) bool {
 	_, _, retCode, err := ctx.Run(args...)
 	if err != nil {
