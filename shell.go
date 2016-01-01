@@ -156,7 +156,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	// status.Printf("Using ports %v\n", ports)
 	gutdPort := ports[0]
 	gutdAddr := fmt.Sprintf("localhost:%d", gutdPort)
-	repoName := RandSeq(8)
+	repoName := RandSeq(8) + local.getPidfileScope()
 
 	eventChan := make(chan FileEvent, eventBufferLength)
 
@@ -178,12 +178,14 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			numTasks--
 		}
 	}
-	goTask(local, func(taskCtx *SyncContext) {
-		err := taskCtx.GutDaemon(repoName, gutdPort)
-		if err != nil {
-			status.Bail(err)
-		}
-	})
+	if len(remotes) > 0 {
+		goTask(local, func(taskCtx *SyncContext) {
+			err := taskCtx.GutDaemon(repoName, gutdPort)
+			if err != nil {
+				status.Bail(err)
+			}
+		})
+	}
 	for _, ctx := range remotes {
 		if !ctx.IsLocal() {
 			goTask(ctx, func(taskCtx *SyncContext) {
