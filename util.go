@@ -192,6 +192,7 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 		}
 	}
 	watchedRoot := ctx.WatchedRoot()
+	ctx.KillViaPidfile(watchType)
 	isFirstTime := true
 	firstTimeChan := make(chan error)
 	go func() {
