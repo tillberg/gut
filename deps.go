@@ -141,7 +141,7 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 		if text == "" || text == "y" || text == "Y" {
 			break
 		} else if attempts >= 3 || text == "N" || text == "n" || text == "q" || text == "Q" {
-			Shutdown("")
+			Shutdown("", 1)
 		}
 	}
 	logger.Printf("@(dim:Attempting to install) %s on %s@(dim:...)\n", depsStrLong, ctx.NameAnsi())
@@ -161,7 +161,7 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 		ctx.ResetHasGutInstalled()
 	} else {
 		logger.Printf("@(error:Installation failed.)\n")
-		Shutdown("")
+		Shutdown("", 1)
 	}
 	return nil
 }

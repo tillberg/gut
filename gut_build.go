@@ -3,12 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/kballard/go-shellquote"
 	"io/ioutil"
 	"os"
 	"path"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kballard/go-shellquote"
 )
 
 func (ctx *SyncContext) EnsureGutFolders() (err error) {
@@ -206,11 +207,11 @@ func (ctx *SyncContext) GutBuild(buildPath string) (err error) {
 		status.Printf("@(dim:Configuring Makefile for gut...)\n")
 		retCode, err := doMake("configure", installPrefix, "configure")
 		if err != nil || retCode != 0 {
-			Shutdown(status.Colorify("@(error:`make configure` failed during gut build.)"))
+			Shutdown(status.Colorify("@(error:`make configure` failed during gut build.)"), 1)
 		}
 		retCode, err = ctx.QuoteCwd("autoconf", buildPath, ctx.AbsPath(path.Join(buildPath, "configure")), installPrefix)
 		if err != nil || retCode != 0 {
-			Shutdown(status.Colorify("@(error:`configure` failed during gut build.)"))
+			Shutdown(status.Colorify("@(error:`configure` failed during gut build.)"), 1)
 		}
 	}
 	parallelism := "1"
@@ -227,13 +228,13 @@ func (ctx *SyncContext) GutBuild(buildPath string) (err error) {
 	}
 	retCode, err := doMake("build", installPrefix, "-j", parallelism)
 	if err != nil || retCode != 0 {
-		Shutdown(status.Colorify("@(error:`make` failed during gut build.)"))
+		Shutdown(status.Colorify("@(error:`make` failed during gut build.)"), 1)
 	}
 	status.Printf("@(dim:Finished building gut.)\n")
 	status.Printf("@(dim:Installing gut to) @(path:%s)@(dim:...)\n", gutDistPath)
 	retCode, err = doMake("install", installPrefix, "install")
 	if err != nil || retCode != 0 {
-		Shutdown(status.Colorify("@(error:`make install` failed during gut build.)"))
+		Shutdown(status.Colorify("@(error:`make install` failed during gut build.)"), 1)
 	}
 	status.Printf("@(dim:Finished installing gut to) @(path:%s)@(dim:.)\n", gutDistPath)
 	return nil

@@ -186,9 +186,9 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 		args = []string{"fswatch", "."}
 	} else {
 		if ctx.IsDarwin() {
-			Shutdown("missing fswatch")
+			Shutdown("missing fswatch", 1)
 		} else {
-			Shutdown("missing inotifywait")
+			Shutdown("missing inotifywait", 1)
 		}
 	}
 	watchedRoot := ctx.WatchedRoot()

@@ -240,7 +240,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 						TrimCommit(tailHash), tailHashFoundOn.SyncPathAnsi())
 					status.Printf("@(commit:%s) @(error:at) %s\n",
 						TrimCommit(myTailHash), ctx.SyncPathAnsi())
-					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"))
+					Shutdown(status.Colorify("@(error:Cannot sync incompatible gut repos.)"), 1)
 				}
 				goTask(ctx, func(taskCtx *SyncContext) {
 					err := taskCtx.GutSetupOrigin(repoName, gutdPort)
@@ -271,7 +271,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 			local.UpdateTailHash()
 			tailHash = local.GetTailHash()
 			if tailHash == "" {
-				Shutdown(status.Colorify("Failed to initialize new gut repo."))
+				Shutdown(status.Colorify("Failed to initialize new gut repo."), 1)
 			}
 			tailHashFoundOn = local
 		} else {
@@ -539,7 +539,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 
 var shutdownLock sync.Mutex
 
-func Shutdown(reason string) {
+func Shutdown(reason string, exitcode int) {
 	shutdownLock.Lock()
 	for i := 0; i < shutdownChanLen; i++ {
 		shutdownChan <- true
@@ -571,7 +571,7 @@ func Shutdown(reason string) {
 	}
 	status.Printf("Exiting.")
 	os.Stderr.WriteString("\n")
-	os.Exit(1)
+	os.Exit(exitcode)
 }
 
 func printUsageInfoAndExit() {
@@ -649,11 +649,16 @@ func main() {
 	}
 	bismuth.SetVerbose(OptsCommon.Verbose)
 
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
 	go func() {
-		<-signalChan
-		Shutdown("Received SIGINT.")
+		sigintChan := make(chan os.Signal, 1)
+		signal.Notify(sigintChan, os.Interrupt)
+		<-sigintChan
+		Shutdown("Received SIGINT.", 1)
+	}()
+	go func() {
+		sighupChan := autorestart.NotifyOnSighup()
+		<-sighupChan
+		Shutdown("Received SIGHUP.", 0)
 	}()
 
 	if cmd == "build" {
@@ -688,7 +693,7 @@ func main() {
 		}
 		if len(remoteArgs) > 0 && os.Getenv("SSH_AUTH_SOCK") == "" {
 			log.Printf("@(error:SSH_AUTH_SOCK is not set in environment. Start up an ssh agent first before running gut-sync.)\n")
-			Shutdown("")
+			Shutdown("", 1)
 		}
 		go func() {
 			err = local.Connect()
@@ -716,7 +721,7 @@ func main() {
 				err = _remote.Connect()
 				if err != nil {
 					status.Printf("@(error:Failed to connect to %s: %s)\n", remote.Hostname(), err)
-					Shutdown("")
+					Shutdown("", 1)
 				}
 				_remote.KillAllViaPidfiles()
 				err = _remote.CheckRemoteDeps()
