@@ -12,6 +12,8 @@ import (
 
 	"github.com/tillberg/ansi-log"
 	"github.com/tillberg/bismuth"
+	"github.com/tillberg/stringset"
+	"github.com/tillberg/watcher"
 )
 
 func WindowsPathToMingwPath(p string) string {
@@ -177,6 +179,10 @@ func (ctx *SyncContext) WatchedRoot() string {
 }
 
 func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
+	if ctx.IsLocal() {
+		ctx.watchForChangesLocal(fileEventCallback)
+		return
+	}
 	watchType := ctx.GetCmd("inotifywait", "fswatch")
 	status := ctx.NewLogger(watchType)
 	args := []string{}
@@ -268,6 +274,25 @@ func (ctx *SyncContext) WatchForChanges(fileEventCallback func(string)) {
 	if err != nil {
 		status.Bail(err)
 	}
+}
+
+func (ctx *SyncContext) watchForChangesLocal(fileEventCallback func(string)) {
+	status := ctx.NewLogger("watcher")
+	listener := watcher.NewListener()
+	listener.Path = ctx.syncPath
+	listener.Ignored = stringset.New(".gut")
+	err := listener.Start()
+	status.BailIf(err)
+
+	go func() {
+		for p := range listener.NotifyChan {
+			relPath, err := filepath.Rel(ctx.syncPath, p)
+			if err != nil {
+				status.Bail(err)
+			}
+			fileEventCallback(relPath)
+		}
+	}()
 }
 
 const GutHashDisplayChars = 7

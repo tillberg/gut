@@ -39,12 +39,14 @@ func (ctx *SyncContext) listMissingLocalDeps() []string {
 
 func (ctx *SyncContext) listMissingRemoteDeps() []string {
 	missing := []string{}
-	if !ctx.tryRun("which", "inotifywait") {
-		if !ctx.tryRun("fswatch", "--version") {
-			if ctx.IsDarwin() {
-				missing = append(missing, "fswatch")
-			} else {
-				missing = append(missing, "inotify-tools")
+	if !ctx.IsLocal() {
+		if !ctx.tryRun("which", "inotifywait") {
+			if !ctx.tryRun("fswatch", "--version") {
+				if ctx.IsDarwin() {
+					missing = append(missing, "fswatch")
+				} else {
+					missing = append(missing, "inotify-tools")
+				}
 			}
 		}
 	}
