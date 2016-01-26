@@ -280,7 +280,7 @@ func (ctx *SyncContext) watchForChangesLocal(fileEventCallback func(string)) {
 	status := ctx.NewLogger("watcher")
 	listener := watcher.NewListener()
 	listener.Path = ctx.syncPath
-	listener.Ignored = stringset.New(".gut")
+	listener.IgnorePart = stringset.New(".gut")
 	err := listener.Start()
 	status.BailIf(err)
 
