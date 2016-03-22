@@ -23,7 +23,6 @@ var OptsCommon struct {
 	Verbose       bool `short:"v" long:"verbose" description:"Show verbose debug information"`
 	Version       bool `long:"version" description:"Print gut-sync version"`
 	NoColor       bool `long:"no-color" description:"Disable ANSI colors"`
-	BuildDeps     bool `long:"build-deps" description:"Build gut-command dependencies from source"`
 	BuildParallel bool `long:"build-parallel" description:"Build gut-commands in parallel via make -j {num_cores}"`
 }
 
@@ -143,7 +142,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	status.Printf("@(dim:Starting gut-sync between) %s@(dim:.)\n", hostsStr)
 
 	for _, ctx := range allContexts {
-		_, err = EnsureBuild(local, ctx, OptsCommon.BuildDeps)
+		_, err = EnsureBuild(local, ctx)
 		if err != nil {
 			status.Bail(err)
 		}
@@ -671,7 +670,7 @@ func main() {
 		if err != nil {
 			status.Bail(err)
 		}
-		didSomething, err := EnsureBuild(local, local, OptsCommon.BuildDeps)
+		didSomething, err := EnsureBuild(local, local)
 		if err != nil {
 			status.Bail(err)
 		}
