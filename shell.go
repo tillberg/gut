@@ -635,7 +635,8 @@ func main() {
 	go autorestart.RestartOnChange()
 	status := log.New(os.Stderr, "", 0)
 	args = args[1:]
-	var argsRemaining, err = flags.ParseArgs(&OptsCommon, args)
+	parser := flags.NewParser(&OptsCommon, flags.IgnoreUnknown)
+	var argsRemaining, err = parser.ParseArgs(args)
 	if err != nil {
 		printUsageInfoAndExit()
 	}
