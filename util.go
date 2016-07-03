@@ -285,8 +285,9 @@ func (ctx *SyncContext) watchForChangesLocal(fileEventCallback func(string)) {
 	status.BailIf(err)
 
 	go func() {
-		for p := range listener.NotifyChan {
-			relPath, err := filepath.Rel(ctx.syncPath, p)
+		for pathEvent := range listener.NotifyChan {
+			path := pathEvent.Path
+			relPath, err := filepath.Rel(ctx.syncPath, path)
 			if err != nil {
 				status.Bail(err)
 			}
