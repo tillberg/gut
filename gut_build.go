@@ -1,7 +1,7 @@
 package main
 
 import (
-	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -106,8 +106,11 @@ func GitHardResetAndClean(local *SyncContext, localPath string, repoUrl string, 
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(gitRemoteOut, repoUrl) {
-		return errors.New("I think I might be trying to git-reset the wrong repo.")
+	// Normalize before & after to adjust for https->git rewrite rules
+	gitRemoteOutNormalized := strings.Replace(gitRemoteOut, "https://github.com/", "git@github.com:", -1)
+	repoUrlNormalized := strings.Replace(repoUrl, "https://github.com/", "git@github.com:", -1)
+	if !strings.Contains(gitRemoteOutNormalized, repoUrlNormalized) {
+		return fmt.Errorf("I think I might be trying to git-reset the wrong repo. `git remote -v` said %q but I expected something like %q.", gitRemoteOut, repoUrl)
 	}
 	_, err = local.QuoteCwd("git-reset", localPath, "git", "reset", "--quiet", "--hard", version)
 	if err != nil {
@@ -213,19 +216,8 @@ func (ctx *SyncContext) GutBuild(buildPath string) (err error) {
 			Shutdown(status.Colorify("@(error:`configure` failed during gut build.)"), 1)
 		}
 	}
-	parallelism := "1"
-	if OptsCommon.BuildParallel {
-		parallelism = ctx.GetNumCores()
-	}
-	plural := "es"
-	if parallelism == "1" {
-		plural = ""
-	}
-	status.Printf("@(dim:Building gut using up to) %s @(dim:process%s...)\n", parallelism, plural)
-	if !OptsCommon.BuildParallel {
-		status.Printf("@(dim:(Use) --build-parallel @(dim)to enable parallel builds.)@(r)\n")
-	}
-	retCode, err := doMake("build", installPrefix, "-j", parallelism)
+	status.Printf("@(dim:Building gut...)\n")
+	retCode, err := doMake("build", installPrefix)
 	if err != nil || retCode != 0 {
 		Shutdown(status.Colorify("@(error:`make` failed during gut build.)"), 1)
 	}

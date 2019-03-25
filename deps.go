@@ -10,7 +10,7 @@ import (
 )
 
 // Arch Linux:
-// - Obviously, needs to use pacman instead of apt-get
+// - Obviously, needs to use pacman instead of apt
 // - Some sort of libcrypto: no version information available thing
 // - Needs wget
 // - Had weird issues with gut precompiled binaries:
@@ -123,7 +123,7 @@ func (ctx *SyncContext) MissingDependency(names ...string) (err error) {
 
 	installCmd := ""
 	if ctx.IsLinux() {
-		installCmd = "sudo apt-get update && sudo apt-get install"
+		installCmd = "sudo apt update && sudo apt install -y"
 	} else if ctx.IsDarwin() {
 		installCmd = "brew install"
 	} else {

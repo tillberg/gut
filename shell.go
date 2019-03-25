@@ -20,10 +20,9 @@ import (
 )
 
 var OptsCommon struct {
-	Verbose       bool `short:"v" long:"verbose" description:"Show verbose debug information"`
-	Version       bool `long:"version" description:"Print gut-sync version"`
-	NoColor       bool `long:"no-color" description:"Disable ANSI colors"`
-	BuildParallel bool `long:"build-parallel" description:"Build gut-commands in parallel via make -j {num_cores}"`
+	Verbose bool `short:"v" long:"verbose" description:"Show verbose debug information"`
+	Version bool `long:"version" description:"Print gut-sync version"`
+	NoColor bool `long:"no-color" description:"Disable ANSI colors"`
 }
 
 var OptsSync struct {
