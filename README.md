@@ -216,7 +216,7 @@ License
 [Go Install]: https://golang.org/doc/install
 [Go Setup]: https://golang.org/doc/code.html
 [crypto/ssh]: https://godoc.org/golang.org/x/crypto/ssh
-[ISC License]: https://github.com/tillberg/gut/blob/master/LICENSE
+[ISC License]: https://github.com/tillberg/gut/blob/master/LICENSE.md
 
 [Syncthing]: https://syncthing.net/
 [Unison]: http://www.cis.upenn.edu/~bcpierce/unison/
