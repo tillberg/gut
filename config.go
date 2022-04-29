@@ -2,7 +2,7 @@ package main
 
 const GutVersion = "1.0.3"
 const GitRepoUrl = "https://github.com/git/git.git"
-const GitVersion = "v2.7.3"
+const GitVersion = "v2.8.5"
 const GitWinRepoUrl = "https://github.com/git-for-windows/git.git"
 const GitWinVersion = "v2.4.4"
 const MsysgitRepoUrl = "https://github.com/msysgit/msysgit.git"

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tillberg/ansi-log"
+	"github.com/tillberg/alog"
 	"github.com/tillberg/bismuth"
 	"github.com/tillberg/stringset"
 	"github.com/tillberg/watcher"

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -106,8 +106,9 @@ func GitHardResetAndClean(local *SyncContext, localPath string, repoUrl string, 
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(gitRemoteOut, repoUrl) {
-		return errors.New("I think I might be trying to git-reset the wrong repo.")
+	// Some folks use a git URL rewrite from https://github.com/... to git@github.com:...
+	if !strings.Contains(gitRemoteOut, repoUrl) && !strings.Contains(gitRemoteOut, strings.Replace(repoUrl, "https://github.com/", "git@github.com:", 1)) {
+		return fmt.Errorf("I think I might be trying to git-reset the wrong repo. in path %q, git remote -v: %q, but I expected %q", localPath, gitRemoteOut, repoUrl)
 	}
 	_, err = local.QuoteCwd("git-reset", localPath, "git", "reset", "--quiet", "--hard", version)
 	if err != nil {

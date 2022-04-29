@@ -14,7 +14,7 @@ import (
 
 	"github.com/jessevdk/go-flags"
 	"github.com/mitchellh/go-homedir"
-	log "github.com/tillberg/ansi-log"
+	log "github.com/tillberg/alog"
 	"github.com/tillberg/autorestart"
 	"github.com/tillberg/bismuth"
 )
@@ -160,7 +160,7 @@ func Sync(local *SyncContext, remotes []*SyncContext) (err error) {
 	eventChan := make(chan FileEvent, eventBufferLength)
 
 	// Start up gut-daemon on the local host, and create a reverse tunnel from each of the remote hosts
-	// back to the local gut-daemon. All hosts can connect to gut-daemon at localhost:<gutdPort>, which
+	// back to the local gut-tdaemon. All hosts can connect to gut-daemon at localhost:<gutdPort>, which
 	// makes configuration a little simpler.
 	ready := make(chan bool)
 	numTasks := 0
