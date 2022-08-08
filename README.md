@@ -54,12 +54,19 @@ Installation via curlbash
 If you have not a care for security, you could just cross your fingers and run this:
 
 ```sh
-bash -c 'S="3bceab0bdc63b2dd7980161ae7d952ea821a23e693cb74961b0d41f61f557489";T="/tmp/gut.sh";set -e;wget -qO- "https://www.tillberg.us/c/$S/gut-1.0.3.sh">$T; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
+bash -c 'S="3bceab0bdc63b2dd7980161ae7d952ea821a23e693cb74961b0d41f61f557489";T="/tmp/gut.sh";set -e;wget -qO $T "https://www.tillberg.us/c/$S/gut-1.0.3.sh"; echo "$S  $T"|shasum -a256 -c-;bash $T;rm $T'
 ```
 
 This will download and install the correct `gut` Go binary to `/usr/local/bin/gut`. It verifies
 the SHA256 sum of the script it downloads, and then in turn in the SHA256 sum of the binary it
 subsequently downloads & installs, but it doesn't verify the integrity of the author.
+
+Or for even less security for better conciseness:
+
+```sh
+wget -qO- "https://www.tillberg.us/c/3bceab0bdc63b2dd7980161ae7d952ea821a23e693cb74961b0d41f61f557489/gut-1.0.3.sh" | bash
+```
+
 But *shrug*, right?
 
 Installation from source
